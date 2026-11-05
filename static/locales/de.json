@@ -355,7 +355,7 @@
     "panel.view-dependent": "Blickabhängige Opazität",
     "panel.view-dependent.max-uncertainty": "Max. Unsicherheit",
     "panel.view-dependent.min-evidence": "Min. Evidenz",
-    "panel.view-dependent.note": "Unsicherheit über dem Maximum oder Evidenz unter dem Minimum ausblenden, jeweils aus der aktuellen Blickrichtung. 1 / 0 zeigt alles.",
+    "panel.view-dependent.note": "Nur Werte innerhalb beider Bereiche aus der aktuellen Blickrichtung zeigen. Alle Richtungen zeigen setzt die Grenzen zurück.",
     "panel.view-dependent.missing": "Diese PLY enthält keine blickabhängigen SH-Attribute.",
     "panel.view-dependent.reset": "Alle Richtungen zeigen",
     "panel.splat-data.view-uncertainty": "Unsicherheit (Blick)",
@@ -363,5 +363,7 @@
     "panel.splat-data.view-dependent-note": "Aktueller Blick, vor Opazitätsfilterung",
     "panel.splat-data.value-total": "Gesamt: {{value}}",
     "panel.splat-data.exact-zero": "Exakt 0: {{value}}",
-    "panel.splat-data.exact-one": "Exakt 1: {{value}}"
+    "panel.splat-data.exact-one": "Exakt 1: {{value}}",
+    "panel.view-dependent.min-uncertainty": "Min. Unsicherheit",
+    "panel.view-dependent.max-evidence": "Max. Evidenz"
 }

@@ -32,9 +32,12 @@ class ViewDependentControls extends Container {
             this.append(row);
             return input;
         };
-        const uncertainty = slider('panel.view-dependent.max-uncertainty', 'max-view-uncertainty', 1, 1);
-        const evidence = slider('panel.view-dependent.min-evidence', 'min-view-evidence', 1, 0);
-        evidence.max = undefined;
+        const minUncertainty = slider('panel.view-dependent.min-uncertainty', 'min-view-uncertainty', 1, 0);
+        const maxUncertainty = slider('panel.view-dependent.max-uncertainty', 'max-view-uncertainty', 1, 1);
+        const minEvidence = slider('panel.view-dependent.min-evidence', 'min-view-evidence', 1, 0);
+        const maxEvidence = slider('panel.view-dependent.max-evidence', 'max-view-evidence', 1, 1);
+        minEvidence.max = undefined;
+        maxEvidence.max = undefined;
         const note = new Label({ class: 'view-dependent-note' });
         this.append(note);
         const reset = new Button({ class: 'view-dependent-reset' });
@@ -47,27 +50,38 @@ class ViewDependentControls extends Container {
             updating = true;
             this.hidden = !selected;
             const data = selected?.viewDependent;
-            uncertainty.enabled = (data?.uncertaintyLayer ?? -1) >= 0;
-            evidence.enabled = (data?.evidenceLayer ?? -1) >= 0;
-            // The slider spans a conservative directional upper bound. Numeric
-            // entry may exceed it, allowing an explicit hide-all threshold.
-            evidence.sliderMax = Math.max(data?.evidenceMax ?? 1, selected?.minViewEvidence ?? 0);
-            uncertainty.value = selected?.maxViewUncertainty ?? 1;
-            evidence.value = selected?.minViewEvidence ?? 0;
-            reset.enabled = uncertainty.enabled || evidence.enabled;
+            minUncertainty.enabled = maxUncertainty.enabled = (data?.uncertaintyLayer ?? -1) >= 0;
+            minEvidence.enabled = maxEvidence.enabled = (data?.evidenceLayer ?? -1) >= 0;
+            // An unlimited evidence cap is shown at a conservative upper bound
+            // for this frame. Both numeric inputs can also exceed that bound.
+            const evidenceRange = Math.max(data?.evidenceMax ?? 1, selected?.minViewEvidence ?? 0, selected?.maxViewEvidence ?? 0);
+            minEvidence.sliderMax = maxEvidence.sliderMax = evidenceRange;
+            minUncertainty.value = selected?.minViewUncertainty ?? 0;
+            maxUncertainty.value = selected?.maxViewUncertainty ?? 1;
+            minEvidence.value = selected?.minViewEvidence ?? 0;
+            maxEvidence.value = selected?.maxViewEvidence ?? evidenceRange;
+            reset.enabled = minUncertainty.enabled || minEvidence.enabled;
             note.text = i18n.t(reset.enabled ? 'panel.view-dependent.note' : 'panel.view-dependent.missing');
             updating = false;
         };
 
-        uncertainty.on('change', (value: number) => {
+        minUncertainty.on('change', (value: number) => {
+            if (!updating && selected) selected.minViewUncertainty = value;
+        });
+        maxUncertainty.on('change', (value: number) => {
             if (!updating && selected) selected.maxViewUncertainty = value;
         });
-        evidence.on('change', (value: number) => {
+        minEvidence.on('change', (value: number) => {
             if (!updating && selected) selected.minViewEvidence = value;
+        });
+        maxEvidence.on('change', (value: number) => {
+            if (!updating && selected) selected.maxViewEvidence = value;
         });
         reset.on('click', () => {
             if (selected) {
+                selected.minViewUncertainty = 0;
                 selected.maxViewUncertainty = 1;
+                selected.maxViewEvidence = null;
                 selected.minViewEvidence = 0;
             }
         });

@@ -1,15 +1,24 @@
 # View-dependent opacity
 
-This fork adds two per-map viewing controls to the scene manager, below Transform.
+This fork adds four per-map viewing controls to the scene manager, below Transform.
 Select a loaded PLY to show them:
 
+- **Min uncertainty**: hide a Gaussian when its directional uncertainty is below this value.
+  Range 0–1; raising it isolates more uncertain Gaussians.
 - **Max uncertainty**: hide a Gaussian when its directional uncertainty exceeds this value.
   Range 0–1; lowering it is stricter.
 - **Min evidence**: hide a Gaussian when its directional observation evidence is below this value.
   Raising it is stricter. The slider range adapts to the map; the numeric field also accepts larger values.
-- **Show all directions** restores maximum uncertainty 1 and minimum evidence 0.
+- **Max evidence**: hide a Gaussian when its directional evidence exceeds this value.
+  Lowering it isolates weakly observed Gaussians. Both evidence sliders adapt to the map.
+- **Show all directions** restores uncertainty 0–1 and evidence 0–unlimited.
+  The unlimited evidence cap is displayed at a conservative upper bound for the map.
 
-The two conditions combine with AND: a Gaussian must pass both. Passing Gaussians
+Both ranges include their endpoints. Moving one limit past the other moves the
+opposite limit to match, so each range stays valid. All four limits are saved
+in projects; older projects default to minimum uncertainty 0 and no evidence cap.
+
+The two ranges combine with AND: a Gaussian must pass both. Passing Gaussians
 keep their normal color and opacity; failing Gaussians are culled. The SH values
 are evaluated on the GPU as the camera moves, including in picking/depth passes
 and the centers overlay. The appearance “SH bands” setting does not reduce these
@@ -103,6 +112,12 @@ degree. The current camera's visibility filter is not baked into geometry or
 base opacity: it remains a viewing setting. When merging multiple maps into one
 PLY, only fields present in every input are retained. Export separate maps if
 their attribute schemas differ.
+
+For investigating uncertain object silhouettes, raise **Min uncertainty** while
+leaving **Max uncertainty** at 1. Pair that with **Min evidence** to inspect
+well-observed but uncertain regions, or lower **Max evidence** to inspect
+uncertainty in weakly observed regions. The filters inspect the existing map;
+they do not change the training observations or recompute uncertainty.
 
 Compressed PLY, SOG, SPZ, SPLAT and standalone viewer exports do not preserve
 these custom viewing controls. Use `.ssproj` or uncompressed `.ply` to keep them.

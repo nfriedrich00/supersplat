@@ -56,8 +56,10 @@ class Splat extends Element {
     state: SplatState;
     transformTexture: Texture;
     viewDependent: ViewDependentData;
+    private _minViewUncertainty = 0;
     private _maxViewUncertainty = 1;
     private _minViewEvidence = 0;
+    private _maxViewEvidence: number | null = null;
     selectionBoundStorage: BoundingBox;
     localBoundStorage: BoundingBox;
     worldBoundStorage: BoundingBox;
@@ -445,7 +447,7 @@ class Splat extends Element {
         serializer.pack(this.visible);
         serializer.pack(this.tintClr.r, this.tintClr.g, this.tintClr.b);
         serializer.pack(this.temperature, this.saturation, this.brightness, this.blackPoint, this.whitePoint, this.transparency);
-        serializer.pack(this.maxViewUncertainty, this.minViewEvidence);
+        serializer.pack(this.minViewUncertainty, this.maxViewUncertainty, this.minViewEvidence, this.maxViewEvidence);
     }
 
     onPreRender() {
@@ -650,8 +652,26 @@ class Splat extends Element {
     }
 
     updateViewDependentMaterial(material: { setParameter: (name: string, value: number) => void }) {
+        material.setParameter('minViewUncertainty', this.minViewUncertainty);
         material.setParameter('maxViewUncertainty', this.maxViewUncertainty);
         material.setParameter('minViewEvidence', this.minViewEvidence);
+        // A negative shader value disables the upper evidence bound. Keep the
+        // stored value nullable so project JSON can represent an unlimited cap.
+        material.setParameter('maxViewEvidence', this.maxViewEvidence ?? -1);
+    }
+
+    set minViewUncertainty(value: number) {
+        if (!Number.isFinite(value)) return;
+        value = Math.max(0, Math.min(1, value));
+        if (value !== this._minViewUncertainty) {
+            this._minViewUncertainty = value;
+            this._maxViewUncertainty = Math.max(this._maxViewUncertainty, value);
+            this.viewDependentChanged();
+        }
+    }
+
+    get minViewUncertainty() {
+        return this._minViewUncertainty;
     }
 
     set maxViewUncertainty(value: number) {
@@ -659,6 +679,7 @@ class Splat extends Element {
         value = Math.max(0, Math.min(1, value));
         if (value !== this._maxViewUncertainty) {
             this._maxViewUncertainty = value;
+            this._minViewUncertainty = Math.min(this._minViewUncertainty, value);
             this.viewDependentChanged();
         }
     }
@@ -672,12 +693,29 @@ class Splat extends Element {
         value = Math.max(0, value);
         if (value !== this._minViewEvidence) {
             this._minViewEvidence = value;
+            if (this._maxViewEvidence !== null) this._maxViewEvidence = Math.max(this._maxViewEvidence, value);
             this.viewDependentChanged();
         }
     }
 
     get minViewEvidence() {
         return this._minViewEvidence;
+    }
+
+    set maxViewEvidence(value: number | null) {
+        if (value !== null) {
+            if (!Number.isFinite(value)) return;
+            value = Math.max(0, value);
+        }
+        if (value !== this._maxViewEvidence) {
+            this._maxViewEvidence = value;
+            if (value !== null) this._minViewEvidence = Math.min(this._minViewEvidence, value);
+            this.viewDependentChanged();
+        }
+    }
+
+    get maxViewEvidence() {
+        return this._maxViewEvidence;
     }
 
     private viewDependentChanged() {
@@ -727,8 +765,10 @@ class Splat extends Element {
             blackPoint: this.blackPoint,
             whitePoint: this.whitePoint,
             transparency: this.transparency,
+            minViewUncertainty: this.minViewUncertainty,
             maxViewUncertainty: this.maxViewUncertainty,
-            minViewEvidence: this.minViewEvidence
+            minViewEvidence: this.minViewEvidence,
+            maxViewEvidence: this.maxViewEvidence
         };
     }
 
@@ -748,8 +788,14 @@ class Splat extends Element {
         this.blackPoint = blackPoint;
         this.whitePoint = whitePoint;
         this.transparency = transparency;
+        // Reset the opposite bound before restoring each pair so the current
+        // UI range cannot clamp a valid saved range. Missing new bounds are unrestricted.
+        this.maxViewUncertainty = 1;
+        this.minViewUncertainty = doc.minViewUncertainty ?? 0;
         this.maxViewUncertainty = doc.maxViewUncertainty ?? 1;
+        this.maxViewEvidence = null;
         this.minViewEvidence = doc.minViewEvidence ?? 0;
+        this.maxViewEvidence = doc.maxViewEvidence ?? null;
     }
 }
 

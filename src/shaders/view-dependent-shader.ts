@@ -9,8 +9,10 @@ const viewDependentShader = /* glsl */`
 #endif
 #if VIEW_UNCERTAINTY_LAYER >= 0 || VIEW_EVIDENCE_LAYER >= 0
 uniform highp sampler2DArray viewDependentSH;
+uniform float minViewUncertainty;
 uniform float maxViewUncertainty;
 uniform float minViewEvidence;
+uniform float maxViewEvidence;
 
 float evaluateViewSH(ivec2 uv, int layer, vec3 d) {
     float x = d.x, y = d.y, z = d.z;
@@ -40,15 +42,20 @@ vec3 viewDependentDirection(vec3 viewCenter, mat4 modelView, bool isOrtho) {
 
 bool viewDependentVisible(ivec2 uv, vec3 viewCenter, mat4 modelView, bool isOrtho) {
     #if VIEW_UNCERTAINTY_LAYER >= 0 || VIEW_EVIDENCE_LAYER >= 0
-        if (maxViewUncertainty >= 1.0 && minViewEvidence <= 0.0) return true;
+        if (minViewUncertainty <= 0.0 && maxViewUncertainty >= 1.0 &&
+            minViewEvidence <= 0.0 && maxViewEvidence < 0.0) return true;
         vec3 direction = viewDependentDirection(viewCenter, modelView, isOrtho);
         #if VIEW_UNCERTAINTY_LAYER >= 0
-            if (maxViewUncertainty < 1.0 &&
-                clamp(evaluateViewSH(uv, VIEW_UNCERTAINTY_LAYER, direction), 0.0, 1.0) > maxViewUncertainty) return false;
+            if (minViewUncertainty > 0.0 || maxViewUncertainty < 1.0) {
+                float uncertainty = clamp(evaluateViewSH(uv, VIEW_UNCERTAINTY_LAYER, direction), 0.0, 1.0);
+                if (uncertainty < minViewUncertainty || uncertainty > maxViewUncertainty) return false;
+            }
         #endif
         #if VIEW_EVIDENCE_LAYER >= 0
-            if (minViewEvidence > 0.0 &&
-                max(evaluateViewSH(uv, VIEW_EVIDENCE_LAYER, direction), 0.0) < minViewEvidence) return false;
+            if (minViewEvidence > 0.0 || maxViewEvidence >= 0.0) {
+                float evidence = max(evaluateViewSH(uv, VIEW_EVIDENCE_LAYER, direction), 0.0);
+                if (evidence < minViewEvidence || (maxViewEvidence >= 0.0 && evidence > maxViewEvidence)) return false;
+            }
         #endif
     #endif
     return true;

@@ -22,6 +22,7 @@ try {
         await page.route('**/view-fixture.ply', route => route.fulfill({ body: Buffer.from(bytes) }));
         await page.evaluate(async () => {
             const bytes = await (await fetch('/view-fixture.ply')).arrayBuffer();
+            for (const splat of window.scene.events.invoke('scene.allSplats')) splat.visible = false;
             await window.scene.events.invoke('import', [{
                 filename: 'fixture.ply', contents: new File([bytes], 'fixture.ply')
             }]);
@@ -70,6 +71,15 @@ try {
     await pose([0, 0, -1]);
     assert.equal(await visible(), true, 'default rendering');
 
+    await threshold('min-view-uncertainty', 0.5);
+    assert.equal(await visible(), false, 'minimum uncertainty hides the low direction');
+    assert.equal(await pick(), 0xffffffff, 'minimum uncertainty applies to picking');
+    await pose([0, 0, 1]);
+    assert.equal(await visible(), true, 'minimum uncertainty keeps the high direction');
+    assert.equal(await pick(), 0, 'high-uncertainty Gaussian remains pickable');
+    await page.getByText('Show all directions', { exact: true }).click();
+    await pose([0, 0, -1]);
+
     await threshold('max-view-uncertainty', 0.5);
     assert.equal(await visible(), true, 'low uncertainty direction');
     assert.equal(await pick(), 0, 'visible Gaussian is pickable');
@@ -78,6 +88,53 @@ try {
     assert.equal(await pick(), 0xffffffff, 'filtered Gaussian is not pickable');
     await page.getByText('Show all directions', { exact: true }).click();
     assert.equal(await visible(), true, 'reset restores the Gaussian');
+
+    await pose(obs);
+    await threshold('max-view-evidence', 2);
+    assert.equal(await visible(), false, 'maximum evidence hides the strongly supported direction');
+    assert.equal(await pick(), 0xffffffff, 'maximum evidence applies to picking');
+    await threshold('max-view-evidence', 3.5);
+    assert.equal(await visible(), true, 'evidence inside the upper bound remains visible');
+    await threshold('min-view-uncertainty', 0.8);
+    await threshold('max-view-uncertainty', 0.9);
+    await threshold('min-view-evidence', 2.5);
+    assert.equal(await visible(), true, 'both finite attribute ranges combine');
+    await pose(obs.map(v => -v));
+    assert.equal(await visible(), false, 'the opposite direction fails the ranges');
+
+    await threshold('max-view-uncertainty', 0.2);
+    assert.equal(await page.locator('#min-view-uncertainty input').inputValue(), '0.2');
+    await threshold('min-view-uncertainty', 0.8);
+    assert.equal(await page.locator('#max-view-uncertainty input').inputValue(), '0.8');
+    await threshold('max-view-evidence', 2);
+    assert.equal(await page.locator('#min-view-evidence input').inputValue(), '2');
+    await threshold('min-view-evidence', 5);
+    assert.equal(await page.locator('#max-view-evidence input').inputValue(), '5');
+
+    const restored = await page.evaluate(() => {
+        const splat = window.scene.events.invoke('selection');
+        splat.minViewUncertainty = 0.6;
+        splat.maxViewUncertainty = 0.9;
+        splat.minViewEvidence = 1.5;
+        splat.maxViewEvidence = 5.5;
+        const saved = JSON.parse(JSON.stringify(splat.docSerialize()));
+        splat.minViewUncertainty = 1;
+        splat.minViewEvidence = 100;
+        splat.docDeserialize(saved);
+        const range = [splat.minViewUncertainty, splat.maxViewUncertainty, splat.minViewEvidence, splat.maxViewEvidence];
+        delete saved.minViewUncertainty;
+        delete saved.maxViewEvidence;
+        splat.docDeserialize(saved);
+        const legacy = [splat.minViewUncertainty, splat.maxViewUncertainty, splat.minViewEvidence, splat.maxViewEvidence];
+        return { range, legacy };
+    });
+    assert.deepEqual(restored.range, [0.6, 0.9, 1.5, 5.5], 'all four limits survive project JSON');
+    assert.deepEqual(restored.legacy, [0, 0.9, 1.5, null], 'older projects have unrestricted new bounds');
+    await page.getByText('Show all directions', { exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => {
+        const splat = window.scene.events.invoke('selection');
+        return [splat.minViewUncertainty, splat.maxViewUncertainty, splat.minViewEvidence, splat.maxViewEvidence];
+    }), [0, 1, 0, null], 'reset clears all four limits');
 
     // Compare the GPU degree-3 evaluation against the observation kernel,
     // including both hemispheres and a rotated entity coordinate frame.
@@ -113,7 +170,9 @@ try {
     await pose([0, 0, -1]);
     assert.equal(await visible(), true, 'ordinary PLY rendering');
     assert.equal(await page.locator('#max-view-uncertainty input').isEditable(), false);
+    assert.equal(await page.locator('#min-view-uncertainty input').isEditable(), false);
     assert.equal(await page.locator('#min-view-evidence input').isEditable(), false);
+    assert.equal(await page.locator('#max-view-evidence input').isEditable(), false);
 
     // Histogram evaluations must use the renderer's data-space direction,
     // and remain available when appearance SH is disabled.
@@ -175,6 +234,24 @@ try {
         await splat.updateState(4);
     });
     await pose([0, 0, -1]);
+    await threshold('max-view-uncertainty', 0);
+    await threshold('max-view-evidence', 0);
+    assert.equal(await visible(), true, 'zero-valued endpoints are included');
+    await threshold('min-view-uncertainty', 1);
+    await threshold('max-view-evidence', 4);
+    await page.evaluate(() => {
+        const scene = window.scene;
+        const splat = scene.events.invoke('selection');
+        const V = scene.camera.mainCamera.getPosition().constructor;
+        const eye = splat.worldTransform.transformPoint(new V(4, 0, 5));
+        const target = splat.worldTransform.transformPoint(new V(4, 0, 0));
+        scene.camera.setPose(eye, target, 0);
+        scene.camera.onUpdate(0);
+        scene.forceRender = true;
+    });
+    assert.equal(await visible(), true, 'uncertainty exactly one passes a minimum of one');
+    await page.getByText('Show all directions', { exact: true }).click();
+    await pose([0, 0, -1]);
     const distribution = await histogram(69);
     assert.deepEqual(distribution, {
         min: 0, max: 1, total: 5, zero: 2, one: 1,
@@ -187,8 +264,10 @@ try {
     assert.ok(onScreen.total < 5 && onScreen.total > 0, 'on-screen filter applies');
     await page.evaluate(() => {
         const splat = window.scene.events.invoke('selection');
+        splat.minViewUncertainty = 0.1;
         splat.maxViewUncertainty = 0.25;
         splat.minViewEvidence = 2;
+        splat.maxViewEvidence = 2.5;
     });
     assert.deepEqual(await histogram(69), distribution, 'distribution is independent of opacity thresholds');
 
@@ -217,7 +296,7 @@ try {
         assert.equal((await histogram(mode)).total, 2, 'independent-field shader variant');
     }
     assert.deepEqual(errors, [], 'browser/GPU errors');
-    console.log('Browser checks passed: directional filtering, picking, histograms, exact endpoints, bin selection, camera/rotation/orthographic views, ordinary PLY.');
+    console.log('Browser checks passed: four directional limits, range crossings, project compatibility, picking, histograms, exact endpoints, bin selection, camera/rotation/orthographic views, ordinary PLY.');
 } finally {
     await browser.close();
 }
