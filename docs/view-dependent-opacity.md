@@ -33,10 +33,10 @@ v2.32.3 checkout and its locked dependencies; an upgrade is not needed for this 
 Import this **normal-color** map:
 
 ```text
-/home/nils241/Uni/MAI/MA/docker_ws/coco/results/gaussian-lic/fg_1022_urz_ext_4_1.ply
+/home/nils241/Uni/MAI/MA/docker_ws/coco/results_fg_1022_urz_ext_4_1/gaussian-lic/fg_1022_urz_ext_4_1.ply
 ```
 
-The copy under `coco/results_fg_1022_urz_ext_4_1/gaussian-lic/` has the same schema.
+For other runs, import the normal-color Gaussian map with the same SH fields.
 The `_uncertainty.ply` also has the two fields, but its appearance was already
 replaced with the exporter's uncertainty colors. `structure_classes.ply` and
 `points3D.ply` are diagnostic point clouds rather than Gaussian maps for this UI.
@@ -72,6 +72,28 @@ Inspection of this run found:
   uncertainty ranged approximately -0.0010–1.0483; evidence approximately
   -0.0000013–35.43. These are sampled directional ranges, not global extrema.
 
+## Distributions in Splat Data
+
+Open **SPLAT DATA** at the bottom and select **Uncertainty (view)** or
+**Evidence (view)**. These entries appear in the default property list when
+the loaded map has the corresponding field; “All Properties” is not required.
+Their histograms refresh after the camera settles and use the same degree-3 SH
+evaluation, coordinate transforms and clamping as the opacity sliders.
+
+Above the histogram, **Exactly 0** and **Exactly 1** show counts and percentages
+for uncertainty; evidence shows **Exactly 0**. These are exact comparisons after
+clamping, with no epsilon or rounding. They are counted separately from the
+first/last histogram bins, which can also contain nearby non-endpoint values.
+The total and endpoint counts exclude locked/deleted Gaussians, as do the other
+property histograms. “On Screen Only” additionally limits them to the camera's
+frustum. Opacity thresholds do not restrict the distributions, so filtered-out
+Gaussians remain available for inspection.
+
+The existing log scale, selected/unselected breakdown, bucket hover counts,
+and click/drag bucket selection also work for these properties. A bucket
+selection includes all values in the bucket, including nearby values; the exact
+endpoint readouts are separate statistics.
+
 ## Saving and limits
 
 Project saves retain both the fields and the chosen viewing thresholds.
@@ -105,7 +127,9 @@ npm run test:view-dependent
 The regression tests cover binary PLY loading/reordering, missing/invalid fields,
 and preservation and rotation on uncompressed export/project saves. An optional
 real-browser test compares rendered visibility with the analytic observation
-kernel from multiple camera directions and after entity rotation:
+kernel from multiple camera directions and after entity rotation. It also checks
+GPU histograms, exact endpoint counts versus nearby values, bucket selection,
+locked/deleted and on-screen filtering, and orthographic evaluation:
 
 ```sh
 # With Playwright available and the built editor served on port 3100:

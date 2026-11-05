@@ -75,6 +75,7 @@ const binVS = /* glsl */ `
     uniform int numBins;
 
     varying float v_flag;
+    varying vec2 v_endpoints;
 
     void main(void) {
         float val;
@@ -83,6 +84,8 @@ const binVS = /* glsl */ `
         bool valid = computeSplatValue(gl_VertexID, val, sel, vis);
         bool include = valid && vis;
         v_flag = include ? (sel ? 2.0 : 1.0) : 0.0;
+        // Separate exact counts from edge bins, which also include nearby values.
+        v_endpoints = include ? vec2(val == 0.0 ? 1.0 : 0.0, val == 1.0 ? 1.0 : 0.0) : vec2(0.0);
 
         if (!include) {
             gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
@@ -104,10 +107,11 @@ const binVS = /* glsl */ `
 
 const binFS = /* glsl */ `
     varying float v_flag;
+    varying vec2 v_endpoints;
     void main(void) {
         float sel   = v_flag == 2.0 ? 1.0 : 0.0;
         float unsel = v_flag == 1.0 ? 1.0 : 0.0;
-        gl_FragColor = vec4(sel, unsel, 0.0, 0.0);
+        gl_FragColor = vec4(sel, unsel, v_endpoints);
     }
 `;
 

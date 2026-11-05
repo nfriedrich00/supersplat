@@ -78,9 +78,19 @@ class ViewDependentData {
         }
     }
 
+    get shaderKey() {
+        return `${this.uncertaintyLayer}_${this.evidenceLayer}`;
+    }
+
+    getShaderDefines() {
+        return new Map([
+            ['VIEW_UNCERTAINTY_LAYER', `${this.uncertaintyLayer}`],
+            ['VIEW_EVIDENCE_LAYER', `${this.evidenceLayer}`]
+        ]);
+    }
+
     configureMaterial(material: ShaderMaterial) {
-        material.setDefine('VIEW_UNCERTAINTY_LAYER', `${this.uncertaintyLayer}`);
-        material.setDefine('VIEW_EVIDENCE_LAYER', `${this.evidenceLayer}`);
+        this.getShaderDefines().forEach((value, key) => material.setDefine(key, value));
         if (this.texture) material.setParameter('viewDependentSH', this.texture);
     }
 

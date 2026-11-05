@@ -36,6 +36,7 @@ type SelectByRangeOptions = {
     viewProjection?: Mat4;
     cameraPos?: Vec3;
     onScreenOnly?: boolean;
+    isOrtho?: boolean;
 };
 
 const resolve = (scope: ScopeSpace, values: any) => {
@@ -56,7 +57,7 @@ class SelectByRange {
     private device: GraphicsDevice;
 
     // shaders compiled per SH_BANDS, same pattern as CalcHistogram.
-    private shaders: Map<number, Shader> = new Map();
+    private shaders: Map<string, Shader> = new Map();
     private texture: Texture = null;
     private renderTarget: RenderTarget = null;
 
@@ -64,13 +65,15 @@ class SelectByRange {
         this.device = device;
     }
 
-    private getShader(shBands: number): Shader {
-        let shader = this.shaders.get(shBands);
+    private getShader(splat: Splat): Shader {
+        const shBands = getShBands(splat);
+        const key = `${shBands}_${splat.viewDependent.shaderKey}`;
+        let shader = this.shaders.get(key);
         if (!shader) {
-            const defines = new Map<string, string>();
+            const defines = splat.viewDependent.getShaderDefines();
             defines.set('SH_BANDS', `${shBands}`);
             shader = ShaderUtils.createShader(this.device, {
-                uniqueName: `selectByRangeShader_SH${shBands}`,
+                uniqueName: `selectByRangeShader_${key}`,
                 attributes: {
                     vertex_position: SEMANTIC_POSITION
                 },
@@ -78,7 +81,7 @@ class SelectByRange {
                 fragmentGLSL: fragmentShader,
                 fragmentDefines: defines
             });
-            this.shaders.set(shBands, shader);
+            this.shaders.set(key, shader);
         }
         return shader;
     }
@@ -133,7 +136,7 @@ class SelectByRange {
         const numCoeffs = SH_NUM_COEFFS[shBands] ?? 0;
 
         const resources = this.getResources(transformA.width, numSplats);
-        const shader = this.getShader(shBands);
+        const shader = this.getShader(splat);
 
         const entityMatrix = options.entityMatrix ?? identity;
         const viewMatrix = options.viewMatrix ?? identity;
@@ -159,6 +162,7 @@ class SelectByRange {
             viewProjection: viewProjection.data,
             cameraWorldPos: [cameraPos.x, cameraPos.y, cameraPos.z],
             onScreenOnly,
+            cameraIsOrtho: options.isOrtho ? 1 : 0,
             cgScale: [
                 cgInvRange * tintClr.r * (1 + temperature),
                 cgInvRange * tintClr.g,
@@ -173,6 +177,8 @@ class SelectByRange {
             rangeStart: options.rangeStart,
             rangeEnd: options.rangeEnd
         };
+
+        if (splat.viewDependent.texture) values.viewDependentSH = splat.viewDependent.texture;
 
         if (shBands > 0) {
             values.splatSH_1to3 = resource.getTexture('splatSH_1to3');

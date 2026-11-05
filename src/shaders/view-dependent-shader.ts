@@ -1,6 +1,12 @@
 // Same real SH basis/order as gaussian-lic's real_sh_basis_degree_three.
 // These are scalar values: no RGB DC offset (+0.5), sigmoid or SH quantization.
 const viewDependentShader = /* glsl */`
+#ifndef VIEW_UNCERTAINTY_LAYER
+#define VIEW_UNCERTAINTY_LAYER -1
+#endif
+#ifndef VIEW_EVIDENCE_LAYER
+#define VIEW_EVIDENCE_LAYER -1
+#endif
 #if VIEW_UNCERTAINTY_LAYER >= 0 || VIEW_EVIDENCE_LAYER >= 0
 uniform highp sampler2DArray viewDependentSH;
 uniform float maxViewUncertainty;
@@ -23,15 +29,19 @@ float evaluateViewSH(ivec2 uv, int layer, vec3 d) {
            dot(texelFetch(viewDependentSH, ivec3(uv, layer+2), 0), b2) +
            dot(texelFetch(viewDependentSH, ivec3(uv, layer+3), 0), b3);
 }
+
+vec3 viewDependentDirection(vec3 viewCenter, mat4 modelView, bool isOrtho) {
+    // gaussian minus camera in the original PLY frame, including nonuniform
+    // entity/palette scales. Orthographic cameras have parallel viewing rays.
+    vec3 ray = inverse(mat3(modelView)) * (isOrtho ? vec3(0.0, 0.0, -1.0) : viewCenter);
+    return ray / max(length(ray), 1e-8);
+}
 #endif
 
 bool viewDependentVisible(ivec2 uv, vec3 viewCenter, mat4 modelView, bool isOrtho) {
     #if VIEW_UNCERTAINTY_LAYER >= 0 || VIEW_EVIDENCE_LAYER >= 0
         if (maxViewUncertainty >= 1.0 && minViewEvidence <= 0.0) return true;
-        // gaussian minus camera, in the ORIGINAL PLY coordinate frame. The
-        // inverse also handles nonuniform entity/palette scales correctly.
-        vec3 ray = inverse(mat3(modelView)) * (isOrtho ? vec3(0.0, 0.0, -1.0) : viewCenter);
-        vec3 direction = ray / max(length(ray), 1e-8);
+        vec3 direction = viewDependentDirection(viewCenter, modelView, isOrtho);
         #if VIEW_UNCERTAINTY_LAYER >= 0
             if (maxViewUncertainty < 1.0 &&
                 clamp(evaluateViewSH(uv, VIEW_UNCERTAINTY_LAYER, direction), 0.0, 1.0) > maxViewUncertainty) return false;

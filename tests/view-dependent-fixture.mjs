@@ -34,3 +34,24 @@ export const makePly = (xs = [0], prefixes = ['appearance_uncertainty_sh_', 'obs
     });
     return bytes;
 };
+
+// Near-endpoint values share histogram bins with the exact endpoints. The
+// summary must count only the clamped zeros/ones, not the entire edge bins.
+export const makeHistogramPly = () => {
+    const uncertainty = [-0.2, 0, 0.0001, 0.9999, 1.2, 0, 1.2];
+    const evidence = [-0.2, 0, 0.0001, 2, 3, 0, 3];
+    const bytes = makePly(uncertainty.map((_, i) => i));
+    const end = Buffer.from(bytes).indexOf('end_header\n') + 'end_header\n'.length;
+    const names = new TextDecoder().decode(bytes.subarray(0, end)).split('\n')
+    .filter(line => line.startsWith('property ')).map(line => line.split(' ').at(-1));
+    const view = new DataView(bytes.buffer);
+    for (let i = 0; i < uncertainty.length; i++) {
+        for (const [prefix, values] of [['appearance_uncertainty_sh_', uncertainty], ['observation_evidence_sh_', evidence]]) {
+            for (let c = 0; c < 16; c++) {
+                const value = c === 0 ? values[i] / 0.28209479177387814 : 0;
+                view.setFloat32(end + (i * names.length + names.indexOf(`${prefix}${c}`)) * 4, value, true);
+            }
+        }
+    }
+    return bytes;
+};

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { makePly } from './view-dependent-fixture.mjs';
+import { makeHistogramPly, makePly } from './view-dependent-fixture.mjs';
 
 // Optional integration test. Install Playwright separately and run against a
 // built, running editor. PLAYWRIGHT_MODULE can point to an existing installation.
@@ -114,8 +114,110 @@ try {
     assert.equal(await visible(), true, 'ordinary PLY rendering');
     assert.equal(await page.locator('#max-view-uncertainty input').isEditable(), false);
     assert.equal(await page.locator('#min-view-evidence input').isEditable(), false);
+
+    // Histogram evaluations must use the renderer's data-space direction,
+    // and remain available when appearance SH is disabled.
+    await importPly(makePly([0, 4], undefined, obs));
+    const histogram = async (mode, onScreenOnly = false, isOrtho = false) => page.evaluate(async ({ mode, onScreenOnly, isOrtho }) => {
+        const scene = window.scene;
+        const splat = scene.events.invoke('selection');
+        return await scene.commandQueue.enqueue(async () => {
+            const cam = scene.camera.camera;
+            const projection = cam.projectionMatrix.clone().mul(cam.viewMatrix);
+            const options = {
+                entityMatrix: splat.worldTransform, viewMatrix: cam.viewMatrix,
+                cameraPos: scene.camera.position, viewProjection: projection, onScreenOnly, isOrtho
+            };
+            const result = await scene.dataProcessor.calcHistogram(splat, mode, options);
+            const mask = await scene.dataProcessor.selectByRange(splat, mode, {
+                ...options, min: result.min, max: result.max, numBins: 256, rangeStart: 0, rangeEnd: 0
+            });
+            const firstBinXs = Array.from(splat.splatData.getProp('x')).filter((_, i) => mask[i] === 255);
+            scene.dataProcessor.releaseMask(mask);
+            return {
+                min: result.min, max: result.max, total: result.numValues,
+                zero: result.exactZero, one: result.exactOne,
+                first: result.selected[0] + result.unselected[0],
+                last: result.selected[255] + result.unselected[255],
+                selectedFirst: result.selected[0], firstBinXs
+            };
+        });
+    }, { mode, onScreenOnly, isOrtho });
+    for (const rotate of [false, true]) {
+        await pose([0, 0, -1], rotate);
+        const low = await histogram(69);
+        assert.ok(Math.abs(low.min - 0.1) < 1e-6, 'uncertainty histogram in low direction');
+        await pose([0, 0, 1], rotate);
+        const high = await histogram(69);
+        assert.ok(Math.abs(high.max - 0.9) < 1e-6, 'uncertainty histogram in high direction');
+    }
+    await pose(obs, true);
+    const supported = await histogram(70);
+    assert.ok(supported.max >= 3 - 1e-5, 'evidence histogram at an observed direction');
+    const ortho = await histogram(69, false, true);
+    assert.ok(Math.abs(ortho.max - ortho.min) < 1e-6, 'parallel orthographic rays');
+
+    await page.evaluate(() => window.scene.events.fire('statusBar.panelChanged', 'splatData'));
+    await page.locator('[data-property="view-uncertainty"]').click();
+    await pose([0, 0, -1], true);
+    await page.waitForFunction(() => document.querySelector('.histogram-info-min').textContent === '0.100');
+    await pose([0, 0, 1], true);
+    await page.waitForFunction(() => document.querySelector('.histogram-info-max').textContent === '0.900');
+
+    await importPly(makeHistogramPly());
+    await page.evaluate(async () => {
+        const splat = window.scene.events.invoke('selection');
+        const xs = splat.splatData.getProp('x');
+        for (let i = 0; i < xs.length; i++) {
+            const state = xs[i] === 0 ? 1 : xs[i] === 5 ? 2 : xs[i] === 6 ? 4 : 0;
+            if (state) splat.state.setBits({ forEach: fn => fn(i) }, state);
+        }
+        await splat.updateState(4);
+    });
+    await pose([0, 0, -1]);
+    const distribution = await histogram(69);
+    assert.deepEqual(distribution, {
+        min: 0, max: 1, total: 5, zero: 2, one: 1,
+        first: 3, last: 2, selectedFirst: 1, firstBinXs: [0, 1, 2]
+    });
+    const evidenceDistribution = await histogram(70);
+    assert.equal(evidenceDistribution.zero, 2, 'exact evidence zeros');
+    assert.equal(evidenceDistribution.first, 3, 'near-zero evidence is not an exact zero');
+    const onScreen = await histogram(69, true);
+    assert.ok(onScreen.total < 5 && onScreen.total > 0, 'on-screen filter applies');
+    await page.evaluate(() => {
+        const splat = window.scene.events.invoke('selection');
+        splat.maxViewUncertainty = 0.25;
+        splat.minViewEvidence = 2;
+    });
+    assert.deepEqual(await histogram(69), distribution, 'distribution is independent of opacity thresholds');
+
+    await page.evaluate(() => window.scene.events.fire('statusBar.panelChanged', 'splatData'));
+    await page.locator('[data-property="view-uncertainty"]').click();
+    await page.waitForFunction(() => document.querySelector('#histogram-exact-one').textContent === 'Exactly 1: 1 (20.0%)');
+    assert.equal(await page.locator('#histogram-value-total').textContent(), 'Total: 5');
+    assert.equal(await page.locator('#histogram-exact-zero').textContent(), 'Exactly 0: 2 (40.0%)');
+    await page.locator('[data-property="view-evidence"]').click();
+    await page.waitForFunction(() => !document.querySelector('#histogram-view-dependent-stats').hidden);
+    assert.equal(await page.locator('#histogram-exact-one').isVisible(), false);
+    await page.screenshot({ path: process.env.SUPERSPLAT_HISTOGRAM_SCREENSHOT || '/tmp/supersplat-histogram.png' });
+
+    await importPly(makePly([0, 4], []));
+    assert.equal(await page.locator('[data-property="view-uncertainty"]').count(), 0);
+    assert.equal(await page.locator('[data-property="view-evidence"]').count(), 0);
+    assert.equal(await page.locator('#histogram-view-dependent-stats').isVisible(), false);
+
+    for (const [prefix, property, other, mode] of [
+        ['appearance_uncertainty_sh_', 'view-uncertainty', 'view-evidence', 69],
+        ['observation_evidence_sh_', 'view-evidence', 'view-uncertainty', 70]
+    ]) {
+        await importPly(makePly([0, 4], [prefix]));
+        assert.equal(await page.locator(`[data-property="${property}"]`).count(), 1);
+        assert.equal(await page.locator(`[data-property="${other}"]`).count(), 0);
+        assert.equal((await histogram(mode)).total, 2, 'independent-field shader variant');
+    }
     assert.deepEqual(errors, [], 'browser/GPU errors');
-    console.log('Browser checks passed: directional uncertainty/evidence, rotation, picking, numeric thresholds, reset, metadata, ordinary PLY.');
+    console.log('Browser checks passed: directional filtering, picking, histograms, exact endpoints, bin selection, camera/rotation/orthographic views, ordinary PLY.');
 } finally {
     await browser.close();
 }

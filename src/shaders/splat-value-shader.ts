@@ -1,3 +1,5 @@
+import { viewDependentShader } from './view-dependent-shader';
+
 // shared GLSL chunk used by histogram and select-by-range GPU passes.
 //
 // declares the texture and uniform interface for reading per-splat data and
@@ -24,12 +26,16 @@
 //          textures. only valid when SH_BANDS > 0 and N < 3 * shNumCoeffs.
 //   66..68 raw "DC R"/"DC G"/"DC B" coefficients: inverse of `dcDecode` applied
 //          to `splatColor.rgb`. camera-independent.
+//   69     directional uncertainty, clamped to [0, 1]
+//   70     directional observation evidence, clamped to >= 0
 //
 // the active SH_BANDS define controls which SH samplers are declared and which
 // branches are compiled in. callers must select a matching uniqueName so that
 // each SH_BANDS variant gets its own cached shader.
 
 const computeSplatValueGLSL = /* glsl */ `
+
+${viewDependentShader}
 
 #ifndef SH_BANDS
 #define SH_BANDS 0
@@ -71,6 +77,7 @@ uniform mat4 viewMatrix;
 uniform mat4 viewProjection;
 uniform vec3 cameraWorldPos;
 uniform int onScreenOnly;
+uniform int cameraIsOrtho;
 
 uniform vec3 cgScale;
 uniform float cgOffset;
@@ -106,6 +113,7 @@ struct Splat {
     bool valid;         // state == 0 || state == 1 (not locked / deleted)
     vec3 localPos;      // pre-transform (from transformA)
     vec3 worldPos;      // post entity + per-splat transform
+    mat4 modelMatrix;   // entity + per-splat transform, for scalar SH directions
     bool visible;       // passes the onScreenOnly filter
 };
 
@@ -190,6 +198,7 @@ bool readSplat(int idx, out Splat s) {
     s.localPos = uintBitsToFloat(transformAData.xyz);
 
     vec3 pos = s.localPos;
+    s.modelMatrix = entityMatrix;
     uint ti = texelFetch(splatTransform, s.uv, 0).r;
     if (ti > 0u) {
         int u = int(ti % 512u) * 3;
@@ -199,6 +208,7 @@ bool readSplat(int idx, out Splat s) {
         t[1] = texelFetch(transformPalette, ivec2(u + 1, v), 0);
         t[2] = texelFetch(transformPalette, ivec2(u + 2, v), 0);
         pos = vec4(s.localPos, 1.0) * t;
+        s.modelMatrix = entityMatrix * transpose(mat4(t[0], t[1], t[2], vec4(0.0, 0.0, 0.0, 1.0)));
     }
 
     s.worldPos = (entityMatrix * vec4(pos, 1.0)).xyz;
@@ -385,6 +395,20 @@ bool computeSplatValue(int idx, out float value, out bool selected, out bool vis
         else                     c = dc.b;
         value = (c - 0.5) / SH_C0;
     }
+
+    #if VIEW_UNCERTAINTY_LAYER >= 0 || VIEW_EVIDENCE_LAYER >= 0
+    else if (propMode == 69 || propMode == 70) {
+        mat4 modelView = viewMatrix * s.modelMatrix;
+        vec3 viewCenter = (modelView * vec4(s.localPos, 1.0)).xyz;
+        vec3 direction = viewDependentDirection(viewCenter, modelView, cameraIsOrtho == 1);
+        #if VIEW_UNCERTAINTY_LAYER >= 0
+        if (propMode == 69) value = clamp(evaluateViewSH(s.uv, VIEW_UNCERTAINTY_LAYER, direction), 0.0, 1.0);
+        #endif
+        #if VIEW_EVIDENCE_LAYER >= 0
+        if (propMode == 70) value = max(evaluateViewSH(s.uv, VIEW_EVIDENCE_LAYER, direction), 0.0);
+        #endif
+    }
+    #endif
 
     return true;
 }

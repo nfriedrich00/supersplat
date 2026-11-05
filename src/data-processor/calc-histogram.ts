@@ -39,6 +39,7 @@ type CalcHistogramOptions = {
     viewProjection?: Mat4;
     cameraPos?: Vec3;
     onScreenOnly?: boolean;
+    isOrtho?: boolean;
 };
 
 type CalcHistogramResult = {
@@ -47,6 +48,8 @@ type CalcHistogramResult = {
     min: number;
     max: number;
     numValues: number;
+    exactZero: number;
+    exactOne: number;
 };
 
 const resolve = (scope: ScopeSpace, values: any) => {
@@ -64,8 +67,8 @@ class CalcHistogram {
 
     // shaders are compiled per SH_BANDS value so that each variant declares only
     // the SH samplers it actually reads. reduceShader has no SH dependence.
-    private tileShaders: Map<number, Shader> = new Map();
-    private binShaders: Map<number, Shader> = new Map();
+    private tileShaders: Map<string, Shader> = new Map();
+    private binShaders: Map<string, Shader> = new Map();
     private reduceShader: Shader = null;
 
     private tileTex: Texture = null;
@@ -138,36 +141,40 @@ class CalcHistogram {
         }
     }
 
-    private getTileShader(shBands: number): Shader {
-        let shader = this.tileShaders.get(shBands);
+    private getTileShader(splat: Splat): Shader {
+        const shBands = getShBands(splat);
+        const key = `${shBands}_${splat.viewDependent.shaderKey}`;
+        let shader = this.tileShaders.get(key);
         if (!shader) {
-            const defines = new Map<string, string>();
+            const defines = splat.viewDependent.getShaderDefines();
             defines.set('SH_BANDS', `${shBands}`);
             shader = ShaderUtils.createShader(this.device, {
-                uniqueName: `histTileMinMax_SH${shBands}`,
+                uniqueName: `histTileMinMax_${key}`,
                 attributes: { vertex_position: SEMANTIC_POSITION },
                 vertexGLSL: fullscreenVS,
                 fragmentGLSL: tileMinMaxFS,
                 fragmentDefines: defines
             });
-            this.tileShaders.set(shBands, shader);
+            this.tileShaders.set(key, shader);
         }
         return shader;
     }
 
-    private getBinShader(shBands: number): Shader {
-        let shader = this.binShaders.get(shBands);
+    private getBinShader(splat: Splat): Shader {
+        const shBands = getShBands(splat);
+        const key = `${shBands}_${splat.viewDependent.shaderKey}`;
+        let shader = this.binShaders.get(key);
         if (!shader) {
-            const defines = new Map<string, string>();
+            const defines = splat.viewDependent.getShaderDefines();
             defines.set('SH_BANDS', `${shBands}`);
             shader = ShaderUtils.createShader(this.device, {
-                uniqueName: `histBin_SH${shBands}`,
+                uniqueName: `histBin_${key}`,
                 attributes: { vertex_position: SEMANTIC_POSITION },
                 vertexGLSL: binVS,
                 fragmentGLSL: binFS,
                 vertexDefines: defines
             });
-            this.binShaders.set(shBands, shader);
+            this.binShaders.set(key, shader);
         }
         return shader;
     }
@@ -210,6 +217,7 @@ class CalcHistogram {
             viewProjection: viewProjection.data,
             cameraWorldPos: [cameraPos.x, cameraPos.y, cameraPos.z],
             onScreenOnly,
+            cameraIsOrtho: options?.isOrtho ? 1 : 0,
             cgScale: [
                 cgInvRange * tintClr.r * (1 + temperature),
                 cgInvRange * tintClr.g,
@@ -219,6 +227,8 @@ class CalcHistogram {
             cgSaturation: saturation,
             transparency
         };
+
+        if (splat.viewDependent.texture) values.viewDependentSH = splat.viewDependent.texture;
 
         if (shBands > 0) {
             values.splatSH_1to3 = resource.getTexture('splatSH_1to3');
@@ -282,9 +292,8 @@ class CalcHistogram {
         const { device } = this;
         const { scope } = device;
 
-        const shBands = getShBands(splat);
-        const tileShader = this.getTileShader(shBands);
-        const binShader = this.getBinShader(shBands);
+        const tileShader = this.getTileShader(splat);
+        const binShader = this.getBinShader(splat);
 
         const numSplats = this.setSplatUniforms(splat, mode, options);
 
@@ -337,15 +346,19 @@ class CalcHistogram {
         const selected = new Float32Array(NUM_BINS);
         const unselected = new Float32Array(NUM_BINS);
         let numValues = 0;
+        let exactZero = 0;
+        let exactOne = 0;
         for (let i = 0; i < NUM_BINS; i++) {
             const s = this.binData[i * 4];
             const u = this.binData[i * 4 + 1];
             selected[i] = s;
             unselected[i] = u;
             numValues += s + u;
+            exactZero += this.binData[i * 4 + 2];
+            exactOne += this.binData[i * 4 + 3];
         }
 
-        return { selected, unselected, min, max, numValues };
+        return { selected, unselected, min, max, numValues, exactZero, exactOne };
     }
 }
 

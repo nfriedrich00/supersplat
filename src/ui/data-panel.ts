@@ -39,7 +39,9 @@ const PROP_MODE: { [key: string]: number } = {
     value: 20,
     f_dc_0: 66,
     f_dc_1: 67,
-    f_dc_2: 68
+    f_dc_2: 68,
+    'view-uncertainty': 69,
+    'view-evidence': 70
 };
 
 // f_rest_N maps to mode (21 + N). max 45 SH coefficients (shBands 3).
@@ -62,11 +64,12 @@ const isFinalColorMode = (mode: number) => {
 
 // what kinds of state changes affect a given prop's histogram. mirrors the
 // previous per-event filtering, but consulted only inside hash().
-const isCameraDependentMode = (mode: number) => mode === 4 /* camera-depth */ || isFinalColorMode(mode);
+const isViewDependentMode = (mode: number) => mode === 69 || mode === 70;
+const isCameraDependentMode = (mode: number) => mode === 4 /* camera-depth */ || isFinalColorMode(mode) || isViewDependentMode(mode);
 const isPositionDependentMode = (mode: number) => {
     return mode === 0 || mode === 1 || mode === 2 || // x / y / z
         mode === 3 || mode === 4 ||                  // distance / camera-depth
-        isFinalColorMode(mode);
+        isFinalColorMode(mode) || isViewDependentMode(mode);
 };
 // ColorGrade-dependent. f_dc_* (raw DC, modes 66..68) bypasses ColorGrade.
 const isColorGradeDependentMode = (mode: number) => mode === 8 /* opacity */ || isFinalColorMode(mode);
@@ -230,6 +233,8 @@ class DataPanel extends Container {
                 y: `${i18n.t('panel.splat-data.position')} Y`,
                 z: `${i18n.t('panel.splat-data.position')} Z`,
                 opacity: i18n.t('panel.splat-data.opacity'),
+                'view-uncertainty': i18n.t('panel.splat-data.view-uncertainty'),
+                'view-evidence': i18n.t('panel.splat-data.view-evidence'),
                 red: i18n.t('panel.splat-data.red'),
                 green: i18n.t('panel.splat-data.green'),
                 blue: i18n.t('panel.splat-data.blue'),
@@ -271,6 +276,8 @@ class DataPanel extends Container {
             const dataProps = splat.splatData.getElement('vertex').properties.map(p => p.name);
             const derivedProps = ['distance', 'camera-depth', 'volume', 'surface-area', 'red', 'green', 'blue', 'hue', 'saturation', 'value'];
             const availableProps = new Set(dataProps.concat(derivedProps));
+            if (splat.viewDependent.uncertaintyLayer >= 0) availableProps.add('view-uncertainty');
+            if (splat.viewDependent.evidenceLayer >= 0) availableProps.add('view-evidence');
 
             // build ordered default props from localizations keys, filtered to available
             const defaultProps = Object.keys(localizations).filter(p => availableProps.has(p));
@@ -299,6 +306,7 @@ class DataPanel extends Container {
             allProps.forEach((prop) => {
                 const item = document.createElement('div');
                 item.classList.add('data-list-item');
+                item.dataset.property = prop;
                 if (prop === selectedDataProp) {
                     item.classList.add('active');
                 }
@@ -342,6 +350,20 @@ class DataPanel extends Container {
         const histogramContainer = new Container({
             id: 'histogram-container'
         });
+
+        const endpointStats = document.createElement('div');
+        endpointStats.id = 'histogram-view-dependent-stats';
+        endpointStats.hidden = true;
+        const endpointNote = document.createElement('span');
+        endpointNote.className = 'histogram-endpoint-note';
+        const endpointTotal = document.createElement('span');
+        endpointTotal.id = 'histogram-value-total';
+        const endpointZero = document.createElement('span');
+        endpointZero.id = 'histogram-exact-zero';
+        const endpointOne = document.createElement('span');
+        endpointOne.id = 'histogram-exact-one';
+        endpointStats.append(endpointNote, endpointTotal, endpointZero, endpointOne);
+        histogramContainer.dom.appendChild(endpointStats);
 
         // wrap the canvas, SVG highlight overlay and stats overlay so the
         // parent can be a flex column with a fixed info row underneath. without
@@ -448,12 +470,29 @@ class DataPanel extends Container {
             positionsVersion: 0
         };
 
+        let exactCounts: { zero: number, one: number, total: number } = null;
+        const refreshEndpointStats = () => {
+            endpointStats.hidden = !isViewDependentMode(inputs.mode) || !exactCounts || lastGpuMode !== inputs.mode;
+            if (endpointStats.hidden) return;
+            const format = (count: number) => {
+                const percent = exactCounts.total ? count / exactCounts.total * 100 : 0;
+                return `${count.toLocaleString()} (${percent.toFixed(1)}%)`;
+            };
+            endpointNote.textContent = i18n.t('panel.splat-data.view-dependent-note');
+            endpointTotal.textContent = i18n.t('panel.splat-data.value-total', { value: exactCounts.total.toLocaleString() });
+            endpointZero.textContent = i18n.t('panel.splat-data.exact-zero', { value: format(exactCounts.zero) });
+            endpointOne.textContent = i18n.t('panel.splat-data.exact-one', { value: format(exactCounts.one) });
+            endpointOne.hidden = inputs.mode !== PROP_MODE['view-uncertainty'];
+        };
+        i18n.onChange(refreshEndpointStats, this);
+
         const buildGpuOpts = () => {
             const cam = splat.scene.camera.camera;
             const opts: any = {
                 entityMatrix: splat.entity.getWorldTransform(),
                 viewMatrix: cam.viewMatrix,
-                cameraPos: splat.scene.camera.position
+                cameraPos: splat.scene.camera.position,
+                isOrtho: splat.scene.camera.ortho
             };
             if (inputs.onScreenOnly) {
                 viewProjection.mul2(cam.projectionMatrix, cam.viewMatrix);
@@ -466,6 +505,8 @@ class DataPanel extends Container {
         const scheduleUpdate = () => {
             if (!splat || this.hidden) return;
             const mode = inputs.mode;
+            exactCounts = null;
+            refreshEndpointStats();
             const opts = buildGpuOpts();
             // pendingToken collapses bursts of triggers within a single queue
             // tick (e.g. rapid camera-settle + color-grade) so only the latest
@@ -479,6 +520,8 @@ class DataPanel extends Container {
                     if (myToken !== pendingToken) return;
 
                     lastGpuMode = mode;
+                    exactCounts = { zero: result.exactZero, one: result.exactOne, total: result.numValues };
+                    refreshEndpointStats();
 
                     histogram.setData({
                         selected: result.selected,
@@ -556,12 +599,22 @@ class DataPanel extends Container {
             }
         });
 
+        events.on('splat.replaced', (splat_: Splat) => {
+            if (splat_ === splat) {
+                populateDataSelector(splat);
+                inputs.positionsVersion++;
+                inputs.stateVersion++;
+                tick();
+            }
+        });
+
         // bump cameraVersion only after the camera has stopped moving for
         // CAMERA_SETTLE_MS, so a single drag doesn't spam GPU passes. whether
         // the bump triggers a refresh is decided per-prop inside hashInputs.
         const CAMERA_SETTLE_MS = 150;
         let cameraTimer: number | null = null;
         const lastCameraMatrix = new Mat4();
+        const lastProjectionMatrix = new Mat4();
         const clearCameraTimer = () => {
             if (cameraTimer !== null) {
                 clearTimeout(cameraTimer);
@@ -576,8 +629,11 @@ class DataPanel extends Container {
                 clearCameraTimer();
                 return;
             }
-            if (!cameraMatrix.equals(lastCameraMatrix)) {
+            const projectionMatrix = splat?.scene.camera.camera.projectionMatrix;
+            if (!projectionMatrix) return;
+            if (!cameraMatrix.equals(lastCameraMatrix) || !projectionMatrix.equals(lastProjectionMatrix)) {
                 lastCameraMatrix.copy(cameraMatrix);
+                lastProjectionMatrix.copy(projectionMatrix);
                 clearCameraTimer();
                 cameraTimer = window.setTimeout(() => {
                     cameraTimer = null;
@@ -609,6 +665,8 @@ class DataPanel extends Container {
         events.on('selection.changed', (selection: Element) => {
             if (selection instanceof Splat) {
                 splat = selection;
+                exactCounts = null;
+                refreshEndpointStats();
                 inputs.splatId = splat.uid;
                 inputs.mode = propModeFor(selectedDataProp) ?? 0;
                 populateDataSelector(splat);

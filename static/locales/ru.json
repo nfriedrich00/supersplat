@@ -357,5 +357,11 @@
     "panel.view-dependent.min-evidence": "Min evidence",
     "panel.view-dependent.note": "Hide uncertainty above the maximum or evidence below the minimum, evaluated from the current view. 1 / 0 shows all.",
     "panel.view-dependent.missing": "This PLY has no view-dependent SH attributes.",
-    "panel.view-dependent.reset": "Show all directions"
+    "panel.view-dependent.reset": "Show all directions",
+    "panel.splat-data.view-uncertainty": "Uncertainty (view)",
+    "panel.splat-data.view-evidence": "Evidence (view)",
+    "panel.splat-data.view-dependent-note": "Current view, before opacity filtering",
+    "panel.splat-data.value-total": "Total: {{value}}",
+    "panel.splat-data.exact-zero": "Exactly 0: {{value}}",
+    "panel.splat-data.exact-one": "Exactly 1: {{value}}"
 }
