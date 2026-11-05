@@ -1,0 +1,9 @@
+services:
+  supersplat:
+    image: supersplat-view-dependent:local
+    build:
+      context: .
+    ports:
+      - "3000:3000"
+    restart: "no"
+    init: true

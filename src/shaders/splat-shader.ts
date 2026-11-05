@@ -1,5 +1,9 @@
+import { viewDependentShader } from './view-dependent-shader';
+
 const vertexShader = /* glsl*/`
 #include "gsplatCommonVS"
+
+${viewDependentShader}
 
 uniform sampler2D splatState;
 
@@ -72,6 +76,11 @@ void main(void) {
     center.modelCenterOriginal = modelCenter;
     center.modelCenterModified = modelCenter;
     if (!initCenter(modelCenter, center)) {
+        gl_Position = discardVec;
+        return;
+    }
+
+    if (!viewDependentVisible(splat.uv, center.view, center.modelView, camera_params.w == 1.0)) {
         gl_Position = discardVec;
         return;
     }

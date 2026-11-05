@@ -8,6 +8,7 @@ import sceneNewSvg from './svg/new.svg';
 import soloSvg from './svg/solo.svg';
 import { Tooltips } from './tooltips';
 import { Transform } from './transform';
+import { ViewDependentControls } from './view-dependent-controls';
 
 const createSvg = (svgString: string) => {
     const decodedStr = decodeURIComponent(svgString.substring('data:image/svg+xml,'.length));
@@ -116,6 +117,7 @@ class ScenePanel extends Container {
         this.append(splatListContainer);
         this.append(transformHeader);
         this.append(new Transform(events));
+        this.append(new ViewDependentControls(events));
         this.append(new Element({
             class: 'panel-header',
             height: 20

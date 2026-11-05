@@ -21,6 +21,7 @@ import { vertexShader, fragmentShader, gsplatCenter } from './shaders/splat-shad
 import { State, SplatState } from './splat-state';
 import { Transform } from './transform';
 import { TransformPalette } from './transform-palette';
+import { ViewDependentData } from './view-dependent';
 
 const vec = new Vec3();
 const veca = new Vec3();
@@ -54,6 +55,9 @@ class Splat extends Element {
     // all writes go through state.setBits/clearBits/toggleBits, then flush().
     state: SplatState;
     transformTexture: Texture;
+    viewDependent: ViewDependentData;
+    private _maxViewUncertainty = 1;
+    private _minViewEvidence = 0;
     selectionBoundStorage: BoundingBox;
     localBoundStorage: BoundingBox;
     worldBoundStorage: BoundingBox;
@@ -117,6 +121,8 @@ class Splat extends Element {
             material.setDefine('SH_BANDS', `${Math.min(bands, (instance.resource as GSplatResource).shBands)}`);
             material.setParameter('splatState', this.stateTexture);
             material.setParameter('splatTransform', this.transformTexture);
+            this.viewDependent.configureMaterial(material);
+            this.updateViewDependentMaterial(material);
             material.update();
         };
 
@@ -196,6 +202,7 @@ class Splat extends Element {
         this.stateTexture = createTexture('splatState', PIXELFORMAT_R8);
         this.state = new SplatState(splatData.getProp('state') as Uint8Array, this.stateTexture);
         this.transformTexture = createTexture('splatTransform', PIXELFORMAT_R16U);
+        this.viewDependent = new ViewDependentData(device, splatData, width, height);
 
         this.localBoundStorage = instance.resource.aabb;
         // @ts-ignore
@@ -249,6 +256,7 @@ class Splat extends Element {
         const oldAsset = this.asset;
         const oldStateTexture = this.stateTexture;
         const oldTransformTexture = this.transformTexture;
+        const oldViewDependent = this.viewDependent;
 
         // carry the current transform onto the new entity
         const position = oldEntity.getLocalPosition().clone();
@@ -289,6 +297,7 @@ class Splat extends Element {
         oldEntity.destroy();
         oldStateTexture.destroy();
         oldTransformTexture.destroy();
+        oldViewDependent.destroy();
         oldAsset.registry?.remove(oldAsset);
         oldAsset.unload();
 
@@ -299,6 +308,10 @@ class Splat extends Element {
     destroy() {
         super.destroy();
         this.entity.destroy();
+        this.stateTexture.destroy();
+        this.transformTexture.destroy();
+        this.viewDependent.destroy();
+        this.transformPalette.texture.destroy();
         this.asset.registry.remove(this.asset);
         this.asset.unload();
     }
@@ -432,6 +445,7 @@ class Splat extends Element {
         serializer.pack(this.visible);
         serializer.pack(this.tintClr.r, this.tintClr.g, this.tintClr.b);
         serializer.pack(this.temperature, this.saturation, this.brightness, this.blackPoint, this.whitePoint, this.transparency);
+        serializer.pack(this.maxViewUncertainty, this.minViewEvidence);
     }
 
     onPreRender() {
@@ -474,6 +488,7 @@ class Splat extends Element {
 
         material.setParameter('saturation', this.saturation);
         material.setParameter('transformPalette', this.transformPalette.texture);
+        this.updateViewDependentMaterial(material);
 
         if (this.visible && selected) {
             // render bounding box
@@ -634,6 +649,44 @@ class Splat extends Element {
         return this._transparency;
     }
 
+    updateViewDependentMaterial(material: { setParameter: (name: string, value: number) => void }) {
+        material.setParameter('maxViewUncertainty', this.maxViewUncertainty);
+        material.setParameter('minViewEvidence', this.minViewEvidence);
+    }
+
+    set maxViewUncertainty(value: number) {
+        if (!Number.isFinite(value)) return;
+        value = Math.max(0, Math.min(1, value));
+        if (value !== this._maxViewUncertainty) {
+            this._maxViewUncertainty = value;
+            this.viewDependentChanged();
+        }
+    }
+
+    get maxViewUncertainty() {
+        return this._maxViewUncertainty;
+    }
+
+    set minViewEvidence(value: number) {
+        if (!Number.isFinite(value)) return;
+        value = Math.max(0, value);
+        if (value !== this._minViewEvidence) {
+            this._minViewEvidence = value;
+            this.viewDependentChanged();
+        }
+    }
+
+    get minViewEvidence() {
+        return this._minViewEvidence;
+    }
+
+    private viewDependentChanged() {
+        if (this.scene) {
+            this.scene.forceRender = true;
+            this.scene.events.fire('splat.viewDependent', this);
+        }
+    }
+
     // get pivot position/rotation/scale (caller should have awaited operation that changed data)
     getPivot(result: Transform) {
         const { entity } = this;
@@ -673,7 +726,9 @@ class Splat extends Element {
             brightness: this.brightness,
             blackPoint: this.blackPoint,
             whitePoint: this.whitePoint,
-            transparency: this.transparency
+            transparency: this.transparency,
+            maxViewUncertainty: this.maxViewUncertainty,
+            minViewEvidence: this.minViewEvidence
         };
     }
 
@@ -693,6 +748,8 @@ class Splat extends Element {
         this.blackPoint = blackPoint;
         this.whitePoint = whitePoint;
         this.transparency = transparency;
+        this.maxViewUncertainty = doc.maxViewUncertainty ?? 1;
+        this.minViewEvidence = doc.minViewEvidence ?? 0;
     }
 }
 

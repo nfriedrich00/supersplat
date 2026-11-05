@@ -4,6 +4,8 @@
     top: 102px;
     left: 24px;
     width: 320px;
+    max-height: calc(100% - 180px);
+    overflow-y: auto;
 }
 
 .collapsed #scene-panel {
@@ -22,4 +24,47 @@
 .splat-list-container {
     max-height: 300px;
     overflow: auto;
+}
+
+#view-dependent-controls {
+    .panel-header {
+        display: flex;
+        padding: 6px;
+        background-color: $bcg-dark;
+    }
+
+    .panel-header-label {
+        color: $text-primary;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+
+    .view-dependent-row {
+        display: flex;
+        align-items: center;
+        padding: 2px 6px;
+    }
+
+    .view-dependent-label {
+        width: 106px;
+        flex-shrink: 0;
+    }
+
+    .view-dependent-slider {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+    }
+
+    .view-dependent-note {
+        display: block;
+        white-space: normal;
+        line-height: 1.5;
+        margin: 6px 10px;
+    }
+
+    .view-dependent-reset {
+        display: block;
+        margin: 6px 10px;
+    }
 }

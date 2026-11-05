@@ -351,5 +351,11 @@
 
     "tooltip.splat-data.on-screen-only": "Ne compter que les splats visibles dans la caméra. Les splats hors écran sont exclus de l'histogramme.",
     "tooltip.splat-data.log-scale": "Utiliser une échelle verticale logarithmique pour rendre visibles les petites valeurs à côté des grandes.",
-    "tooltip.splat-data.show-all": "Afficher toutes les propriétés des splats dans la liste, y compris les coefficients DC bruts et harmoniques sphériques."
+    "tooltip.splat-data.show-all": "Afficher toutes les propriétés des splats dans la liste, y compris les coefficients DC bruts et harmoniques sphériques.",
+    "panel.view-dependent": "View-dependent opacity",
+    "panel.view-dependent.max-uncertainty": "Max uncertainty",
+    "panel.view-dependent.min-evidence": "Min evidence",
+    "panel.view-dependent.note": "Hide uncertainty above the maximum or evidence below the minimum, evaluated from the current view. 1 / 0 shows all.",
+    "panel.view-dependent.missing": "This PLY has no view-dependent SH attributes.",
+    "panel.view-dependent.reset": "Show all directions"
 }

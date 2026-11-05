@@ -37,6 +37,7 @@ import { Events } from './events';
 import { SHRotation } from './sh-utils';
 import { Splat } from './splat';
 import { State } from './splat-state';
+import { coefficientNames, viewDependentPrefixes } from './view-dependent';
 
 type SerializeSettings = {
     maxSHBands?: number;            // specifies the maximum number of bands to be exported
@@ -361,6 +362,8 @@ class SingleSplat {
         const dstSHBands = calcSHBands(new Set(Object.keys(data)));
         const dstSHCoeffs = shBandCoeffs[dstSHBands];
         const tmpSHData = dstSHBands ? new Float32Array(dstSHCoeffs) : null;
+        const scalarFields = viewDependentPrefixes.map(coefficientNames).filter(names => names.every(name => data.hasOwnProperty(name)));
+        const tmpScalarSH = scalarFields.length ? new Float32Array(15) : null;
 
         type CacheEntry = {
             splat: Splat;
@@ -449,6 +452,14 @@ class SingleSplat {
                 }
             }
 
+            // Scalar SH fields rotate with the map, just like appearance SH.
+            // The DC coefficient is invariant and has no color-grade offset.
+            for (const names of scalarFields) {
+                for (let d = 0; d < 15; d++) tmpScalarSH[d] = data[names[d + 1]];
+                transformCache.getSHRot(i).apply(tmpScalarSH);
+                for (let d = 0; d < 15; d++) data[names[d + 1]] = tmpScalarSH[d];
+            }
+
             if (!serializeSettings.keepColorTint && hasColor && grade.hasTint) {
                 const c = {
                     r: dcDecode(data.f_dc_0),
@@ -498,7 +509,7 @@ const EXPORT_CHUNK_SIZE = 256 * 1024;
 // interleaved packing here must match splat-transform's readers/materialize:
 // position = xyz (stride 12); geometric = rot0-3, scale0-2, opacity (stride 32);
 // color = dc0-2 then f_rest_* (stride (3 + numRest) * 4).
-const buildLayouts = (numRest: number): Partial<Record<ChunkLayer, LayerLayout>> => ({
+const buildLayouts = (numRest: number, extras: string[]): Partial<Record<ChunkLayer, LayerLayout>> => ({
     position: {
         stride: 12,
         fields: { position: { byteOffset: 0, components: 3, type: 'float32' } }
@@ -519,7 +530,13 @@ const buildLayouts = (numRest: number): Partial<Record<ChunkLayer, LayerLayout>>
         } : {
             dc: { byteOffset: 0, components: 3, type: 'float32' }
         }
-    }
+    },
+    ...(extras.length ? {
+        other: {
+            stride: extras.length * 4,
+            fields: Object.fromEntries(extras.map((name, i) => [name, { byteOffset: i * 4, components: 1, type: 'float32' }]))
+        } as LayerLayout
+    } : {})
 });
 
 /**
@@ -541,6 +558,7 @@ class SuperSplatChunkSource implements ChunkSource {
     private localOf: Uint32Array;   // output row -> gaussian index within that splat
     private singleSplat: SingleSplat;
     private numRest: number;
+    private extras: string[];
 
     constructor(splats: Splat[], settings: SerializeSettings) {
         this.splats = splats;
@@ -551,6 +569,9 @@ class SuperSplatChunkSource implements ChunkSource {
         const outputBands = Math.min(settings.maxSHBands ?? 3, splatBands.length ? Math.max(...splatBands) : 0);
         const numRest = SH_REST_COUNTS[outputBands];
         this.numRest = numRest;
+        const common = new Set(getCommonPropNames(splats));
+        this.extras = viewDependentPrefixes.map(coefficientNames)
+        .filter(names => names.every(name => common.has(name))).flat();
 
         // Build the filtered output->source index map (in splat order).
         const filter = new GaussianFilter(settings);
@@ -577,7 +598,8 @@ class SuperSplatChunkSource implements ChunkSource {
             'scale_0', 'scale_1', 'scale_2',
             'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity',
             'rot_0', 'rot_1', 'rot_2', 'rot_3',
-            ...shNames.slice(0, numRest)
+            ...shNames.slice(0, numRest),
+            ...this.extras
         ];
         this.singleSplat = new SingleSplat(members, settings);
 
@@ -589,22 +611,23 @@ class SuperSplatChunkSource implements ChunkSource {
             chunkSize: EXPORT_CHUNK_SIZE,
             numChunks: [numChunks],
             shBands: outputBands as SHBands,
-            extraColumns: [],
+            extraColumns: this.extras.map(name => ({ name, type: 'float32' })),
             transform: Transform.PLY,
-            availableLayers: new Set<ChunkLayer>(['position', 'geometric', 'color']),
-            layouts: buildLayouts(numRest)
+            availableLayers: new Set<ChunkLayer>(['position', 'geometric', 'color', ...(this.extras.length ? ['other' as const] : [])]),
+            layouts: buildLayouts(numRest, this.extras)
         };
     }
 
     read(request: ReadRequest): Promise<void> {
         const isGather = 'indices' in request;
-        const anyBuf = (request.position ?? request.geometric ?? request.color) as ChunkData;
+        const anyBuf = (request.position ?? request.geometric ?? request.color ?? request.other) as ChunkData;
         const count = isGather ? request.count : anyBuf.count;
         const chunkBase = isGather ? 0 : request.chunkIndex * EXPORT_CHUNK_SIZE;
 
         const posF = request.position ? new Float32Array(request.position.data) : null;
         const geoF = request.geometric ? new Float32Array(request.geometric.data) : null;
         const colF = request.color ? new Float32Array(request.color.data) : null;
+        const otherF = request.other ? new Float32Array(request.other.data) : null;
         const cstride = 3 + this.numRest;
 
         const { data } = this.singleSplat;
@@ -638,6 +661,11 @@ class SuperSplatChunkSource implements ChunkSource {
                 colF[o + 2] = data.f_dc_2;
                 for (let r = 0; r < this.numRest; ++r) {
                     colF[o + 3 + r] = data[shNames[r]];
+                }
+            }
+            if (otherF) {
+                for (let e = 0; e < this.extras.length; e++) {
+                    otherF[i * this.extras.length + e] = data[this.extras[e]];
                 }
             }
         }

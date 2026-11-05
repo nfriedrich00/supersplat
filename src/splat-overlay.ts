@@ -137,6 +137,8 @@ class SplatOverlay extends Element {
             }
         }
 
+        splat.viewDependent.configureMaterial(material);
+        splat.updateViewDependentMaterial(material);
         material.update();
 
         // subscribe to sorter updates for dynamic count, caching the sorter so
@@ -185,6 +187,7 @@ class SplatOverlay extends Element {
             material.setParameter('unselectedClr', [unselectedClr.r, unselectedClr.g, unselectedClr.b, unselectedClr.a]);
             material.setParameter('useGaussianColor', useGaussianColor);
             material.setParameter('transformPalette', this.splat.transformPalette.texture);
+            this.splat.updateViewDependentMaterial(material);
 
             // pass camera position for SH evaluation
             const camPos = scene.camera.mainCamera.getPosition();

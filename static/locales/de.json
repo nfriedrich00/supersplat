@@ -351,5 +351,11 @@
 
     "tooltip.splat-data.on-screen-only": "Nur Splats zählen, die in der Kameraansicht sichtbar sind. Splats außerhalb des Bildschirms werden aus dem Histogramm ausgeschlossen.",
     "tooltip.splat-data.log-scale": "Logarithmische vertikale Skala verwenden, damit kleine Werte neben großen sichtbar bleiben.",
-    "tooltip.splat-data.show-all": "Alle Eigenschaften pro Splat in der Liste anzeigen, einschließlich roher DC- und Kugelflächenfunktions-Koeffizienten."
+    "tooltip.splat-data.show-all": "Alle Eigenschaften pro Splat in der Liste anzeigen, einschließlich roher DC- und Kugelflächenfunktions-Koeffizienten.",
+    "panel.view-dependent": "Blickabhängige Opazität",
+    "panel.view-dependent.max-uncertainty": "Max. Unsicherheit",
+    "panel.view-dependent.min-evidence": "Min. Evidenz",
+    "panel.view-dependent.note": "Unsicherheit über dem Maximum oder Evidenz unter dem Minimum ausblenden, jeweils aus der aktuellen Blickrichtung. 1 / 0 zeigt alles.",
+    "panel.view-dependent.missing": "Diese PLY enthält keine blickabhängigen SH-Attribute.",
+    "panel.view-dependent.reset": "Alle Richtungen zeigen"
 }

@@ -18,6 +18,9 @@ To learn more about using SuperSplat, please refer to the [User Guide](https://d
 
 ## Local Development
 
+This fork includes [view-dependent uncertainty and evidence filters](docs/view-dependent-opacity.md)
+for Gaussian-LIC PLY files, plus a Docker setup that builds this local checkout.
+
 To initialize a local development environment for SuperSplat, ensure you have [Node.js](https://nodejs.org/) 18 or later installed. Follow these steps:
 
 1. Clone the repository:
