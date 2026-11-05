@@ -13,9 +13,10 @@ export const evaluate = (sh, direction) => basis(direction).reduce((v, b, i) => 
 export const kernelSH = (observation, weight) => basis(observation).map((b, i) =>
     weight * b * Math.PI * (i === 0 ? 1 : i < 4 ? 3 / 5 : i < 9 ? 1 / 5 : 1 / 35));
 
-export const makePly = (xs = [0], prefixes = ['appearance_uncertainty_sh_', 'observation_evidence_sh_'], observation = [0, 0, 1]) => {
+export const makePly = (xs = [0], prefixes = ['appearance_uncertainty_sh_', 'observation_evidence_sh_'], observation = [0, 0, 1], side = null) => {
     const standard = ['x', 'y', 'z', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'scale_0', 'scale_1', 'scale_2', 'rot_0', 'rot_1', 'rot_2', 'rot_3'];
-    const names = [...standard, ...prefixes.flatMap(prefix => Array.from({ length: 16 }, (_, i) => `${prefix}${i}`))];
+    const names = [...standard, ...prefixes.flatMap(prefix => Array.from({ length: 16 }, (_, i) => `${prefix}${i}`)),
+        ...(side ? ['evidence_normal_x', 'evidence_normal_y', 'evidence_normal_z'] : [])];
     const header = new TextEncoder().encode(`ply\nformat binary_little_endian 1.0\nelement vertex ${xs.length}\n${names.map(name => `property float ${name}\n`).join('')}end_header\n`);
     const bytes = new Uint8Array(header.length + xs.length * names.length * 4);
     bytes.set(header);
@@ -23,17 +24,24 @@ export const makePly = (xs = [0], prefixes = ['appearance_uncertainty_sh_', 'obs
     xs.forEach((x, row) => {
         const values = [x, 0, 0, 1, 1, 1, 4, -1.2, -0.8, -1.5, Math.cos(0.2), 0, 0, Math.sin(0.2)];
         prefixes.forEach(prefix => {
-            const sh = prefix.startsWith('appearance') ? Array(16).fill(0) : kernelSH(observation, x + 3);
+            const opposite = prefix.includes('opposite');
+            const sh = prefix.startsWith('appearance') ? Array(16).fill(0) :
+                kernelSH(opposite ? observation.map(v => -v) : observation, opposite ? (side?.oppositeWeight ?? 0) : x + 3);
             if (prefix.startsWith('appearance')) {
-                sh[0] = 0.5 / 0.28209479177387814;
-                sh[2] = 0.4 / 0.4886025119029199;
+                sh[0] = (side ? (opposite ? 0.8 : 0.2) : 0.5) / 0.28209479177387814;
+                if (!side) sh[2] = 0.4 / 0.4886025119029199;
             }
             values.push(...sh);
         });
+        if (side) values.push(...side.normal);
         values.forEach((value, col) => view.setFloat32(header.length + (row * names.length + col) * 4, value, true));
     });
     return bytes;
 };
+
+export const makeSidedPly = (xs = [0], observation = [0.984807753, 0, 0.173648178], normal = [0, 0, 1], oppositeWeight = 0) =>
+    makePly(xs, ['appearance_uncertainty_sh_', 'observation_evidence_sh_',
+        'appearance_uncertainty_opposite_sh_', 'observation_evidence_opposite_sh_'], observation, { normal, oppositeWeight });
 
 // Near-endpoint values share histogram bins with the exact endpoints. The
 // summary must count only the clamped zeros/ones, not the entire edge bins.

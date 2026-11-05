@@ -355,7 +355,7 @@
     "panel.view-dependent": "Blickabhängige Opazität",
     "panel.view-dependent.max-uncertainty": "Max. Unsicherheit",
     "panel.view-dependent.min-evidence": "Min. Evidenz",
-    "panel.view-dependent.note": "Nur Werte innerhalb beider Bereiche aus der aktuellen Blickrichtung zeigen. Alle Richtungen zeigen setzt die Grenzen zurück.",
+    "panel.view-dependent.note": "Außerhalb der Bereiche: ausblenden oder Ersatzfarbe verwenden. Alle Richtungen zeigen setzt die Grenzen zurück.",
     "panel.view-dependent.missing": "Diese PLY enthält keine blickabhängigen SH-Attribute.",
     "panel.view-dependent.reset": "Alle Richtungen zeigen",
     "panel.splat-data.view-uncertainty": "Unsicherheit (Blick)",
@@ -365,5 +365,9 @@
     "panel.splat-data.exact-zero": "Exakt 0: {{value}}",
     "panel.splat-data.exact-one": "Exakt 1: {{value}}",
     "panel.view-dependent.min-uncertainty": "Min. Unsicherheit",
-    "panel.view-dependent.max-evidence": "Max. Evidenz"
+    "panel.view-dependent.max-evidence": "Max. Evidenz",
+    "panel.view-dependent.outside-range": "Außerhalb",
+    "panel.view-dependent.outside-hide": "Ausblenden",
+    "panel.view-dependent.outside-color": "Farbe verwenden",
+    "panel.view-dependent.fallback-color": "Ersatzfarbe"
 }

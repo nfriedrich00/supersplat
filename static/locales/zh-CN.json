@@ -355,7 +355,7 @@
     "panel.view-dependent": "View-dependent opacity",
     "panel.view-dependent.max-uncertainty": "Max uncertainty",
     "panel.view-dependent.min-evidence": "Min evidence",
-    "panel.view-dependent.note": "Show values within both ranges from the current view. Show all directions resets the limits.",
+    "panel.view-dependent.note": "Outside the ranges: hide or use the fallback color. Show all directions resets the limits.",
     "panel.view-dependent.missing": "This PLY has no view-dependent SH attributes.",
     "panel.view-dependent.reset": "Show all directions",
     "panel.splat-data.view-uncertainty": "Uncertainty (view)",
@@ -365,5 +365,9 @@
     "panel.splat-data.exact-zero": "Exactly 0: {{value}}",
     "panel.splat-data.exact-one": "Exactly 1: {{value}}",
     "panel.view-dependent.min-uncertainty": "Min uncertainty",
-    "panel.view-dependent.max-evidence": "Max evidence"
+    "panel.view-dependent.max-evidence": "Max evidence",
+    "panel.view-dependent.outside-range": "Out of range",
+    "panel.view-dependent.outside-hide": "Hide",
+    "panel.view-dependent.outside-color": "Use color",
+    "panel.view-dependent.fallback-color": "Fallback color"
 }

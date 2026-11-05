@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { makeHistogramPly, makePly } from './view-dependent-fixture.mjs';
+import { makeHistogramPly, makePly, makeSidedPly } from './view-dependent-fixture.mjs';
 
 // Optional integration test. Install Playwright separately and run against a
 // built, running editor. PLAYWRIGHT_MODULE can point to an existing installation.
@@ -42,11 +42,14 @@ try {
         }, { d, rotate });
         await page.waitForTimeout(150);
     };
-    const visible = async () => page.evaluate(async () => {
+    const pixel = async () => page.evaluate(async () => {
         const pixels = await window.scene.events.invoke('render.offscreen', 64, 64);
         const i = (32 * 64 + 32) * 4;
-        return pixels[i] + pixels[i + 1] + pixels[i + 2] > 50;
+        return Array.from(pixels.slice(i, i + 4));
     });
+    const visible = async () => (await pixel()).slice(0, 3).reduce((sum, value) => sum + value, 0) > 50;
+    const fallbackColor = async (rgb) => page.locator('#outside-threshold-color').evaluate((el, value) => { el.ui.value = value; }, rgb);
+    const outsideMode = async (value) => page.locator('#outside-threshold-mode').evaluate((el, mode) => { el.ui.value = mode; }, value);
     const pick = async () => page.evaluate(async () => {
         const scene = window.scene;
         scene.camera.pickPrep(scene.events.invoke('selection'), 'set');
@@ -68,6 +71,8 @@ try {
         window.scene.events.fire('view.setBands', 0);
     });
     assert.equal(await page.locator('#max-view-uncertainty input').inputValue(), '1');
+    assert.equal(await page.evaluate(() => window.scene.events.invoke('selection').outsideThresholdMode), 'hide');
+    assert.equal(await page.locator('#outside-threshold-color').isVisible(), false);
     await pose([0, 0, -1]);
     assert.equal(await visible(), true, 'default rendering');
 
@@ -86,6 +91,75 @@ try {
     await pose([0, 0, 1]);
     assert.equal(await visible(), false, 'high uncertainty direction');
     assert.equal(await pick(), 0xffffffff, 'filtered Gaussian is not pickable');
+
+    // The fallback is a view policy, with the same opacity and geometry as the
+    // original Gaussian. Exercise the actual dropdown and color-picker events.
+    await page.locator('#outside-threshold-mode').click();
+    await page.getByText('Use color', { exact: true }).click();
+    assert.equal(await page.locator('#outside-threshold-color').isVisible(), true);
+    await fallbackColor([1, 0, 0]);
+    const red = await pixel();
+    assert.ok(red[0] > 100 && red[1] === 0 && red[2] === 0 && red[3] > 0, 'out-of-range Gaussian uses the chosen RGB');
+    assert.equal(await pick(), 0, 'fallback geometry remains pickable');
+
+    await threshold('max-view-uncertainty', 1);
+    const inside = await pixel();
+    await outsideMode('hide');
+    const original = await pixel();
+    assert.deepEqual(inside, original, 'in-range appearance is unchanged by color mode');
+    assert.equal(red[3], original[3], 'fallback retains original opacity');
+    await threshold('max-view-uncertainty', 0.5);
+    assert.equal((await pixel())[3], 0, 'Hide still removes out-of-range opacity');
+    await outsideMode('color');
+    await fallbackColor([0, 0, 0]);
+    const black = await pixel();
+    assert.deepEqual(black.slice(0, 3), [0, 0, 0], 'black fallback is valid');
+    assert.equal(black[3], original[3], 'black geometry retains alpha');
+    assert.equal(await pick(), 0, 'black fallback remains pickable');
+    await fallbackColor([1, 1, 1]);
+    const white = await pixel();
+    assert.ok(white[0] > original[0], 'white fallback replaces learned appearance');
+    assert.equal(white[3], original[3]);
+
+    await fallbackColor([0.25, 0.5, 0.75]);
+    const custom = await pixel();
+    for (let channel = 0; channel < 3; channel++) {
+        assert.ok(Math.abs(custom[channel] - custom[3] * [0.25, 0.5, 0.75][channel]) <= 2, 'chosen display RGB is preserved');
+    }
+    await page.evaluate(() => {
+        const scene = window.scene;
+        const splat = scene.events.invoke('selection');
+        splat.brightness = 0.3;
+        splat.saturation = 0;
+        scene.events.fire('camera.setTonemapping', 'aces');
+    });
+    assert.deepEqual(await pixel(), custom, 'color grading and tone mapping cannot tint the fallback');
+    await page.evaluate(() => { window.scene.events.invoke('selection').transparency = 0.5; });
+    assert.ok(Math.abs((await pixel())[3] - original[3] * 0.5) <= 1, 'global transparency still applies');
+    await page.evaluate(() => {
+        const scene = window.scene;
+        const splat = scene.events.invoke('selection');
+        splat.transparency = 1;
+        splat.brightness = 0;
+        splat.saturation = 1;
+        scene.events.fire('camera.setTonemapping', 'linear');
+    });
+    await page.getByText('Show all directions', { exact: true }).click();
+    assert.equal(await page.evaluate(() => window.scene.events.invoke('selection').outsideThresholdMode), 'color', 'range reset keeps the display policy');
+    const colorDocs = await page.evaluate(() => {
+        const splat = window.scene.events.invoke('selection');
+        const saved = JSON.parse(JSON.stringify(splat.docSerialize()));
+        splat.outsideThresholdMode = 'hide';
+        splat.outsideThresholdColor = new splat.outsideThresholdColor.constructor(1, 1, 1);
+        splat.docDeserialize(saved);
+        const restored = [splat.outsideThresholdMode, splat.outsideThresholdColor.toArray([], 0, false)];
+        delete saved.outsideThresholdMode;
+        delete saved.outsideThresholdColor;
+        splat.docDeserialize(saved);
+        return { restored, legacy: [splat.outsideThresholdMode, splat.outsideThresholdColor.toArray([], 0, false)] };
+    });
+    assert.deepEqual(colorDocs.restored, ['color', [0.25, 0.5, 0.75]], 'display policy survives project JSON');
+    assert.deepEqual(colorDocs.legacy, ['hide', [1, 1, 1]], 'older projects keep Hide with a white default color');
     await page.getByText('Show all directions', { exact: true }).click();
     assert.equal(await visible(), true, 'reset restores the Gaussian');
 
@@ -173,6 +247,8 @@ try {
     assert.equal(await page.locator('#min-view-uncertainty input').isEditable(), false);
     assert.equal(await page.locator('#min-view-evidence input').isEditable(), false);
     assert.equal(await page.locator('#max-view-evidence input').isEditable(), false);
+    assert.equal(await page.locator('#outside-threshold-mode').evaluate(el => el.ui.enabled), false);
+    assert.equal(await page.locator('#outside-threshold-color').isVisible(), false);
 
     // Histogram evaluations must use the renderer's data-space direction,
     // and remain available when appearance SH is disabled.
@@ -234,9 +310,9 @@ try {
         await splat.updateState(4);
     });
     await pose([0, 0, -1]);
-    await threshold('max-view-uncertainty', 0);
+    await threshold('max-view-uncertainty', 1);
     await threshold('max-view-evidence', 0);
-    assert.equal(await visible(), true, 'zero-valued endpoints are included');
+    assert.equal(await visible(), true, 'zero evidence implies uncertainty one and remains included');
     await threshold('min-view-uncertainty', 1);
     await threshold('max-view-evidence', 4);
     await page.evaluate(() => {
@@ -253,9 +329,10 @@ try {
     await page.getByText('Show all directions', { exact: true }).click();
     await pose([0, 0, -1]);
     const distribution = await histogram(69);
-    assert.deepEqual(distribution, {
-        min: 0, max: 1, total: 5, zero: 2, one: 1,
-        first: 3, last: 2, selectedFirst: 1, firstBinXs: [0, 1, 2]
+    assert.ok(Math.abs(distribution.min - 0.0001) < 1e-10, 'float32 SH evaluation preserves the near-zero value');
+    assert.deepEqual({ ...distribution, min: 0.0001 }, {
+        min: 0.0001, max: 1, total: 5, zero: 0, one: 3,
+        first: 1, last: 4, selectedFirst: 0, firstBinXs: [2]
     });
     const evidenceDistribution = await histogram(70);
     assert.equal(evidenceDistribution.zero, 2, 'exact evidence zeros');
@@ -268,14 +345,15 @@ try {
         splat.maxViewUncertainty = 0.25;
         splat.minViewEvidence = 2;
         splat.maxViewEvidence = 2.5;
+        splat.outsideThresholdMode = 'color';
     });
     assert.deepEqual(await histogram(69), distribution, 'distribution is independent of opacity thresholds');
 
     await page.evaluate(() => window.scene.events.fire('statusBar.panelChanged', 'splatData'));
     await page.locator('[data-property="view-uncertainty"]').click();
-    await page.waitForFunction(() => document.querySelector('#histogram-exact-one').textContent === 'Exactly 1: 1 (20.0%)');
+    await page.waitForFunction(() => document.querySelector('#histogram-exact-one').textContent === 'Exactly 1: 3 (60.0%)');
     assert.equal(await page.locator('#histogram-value-total').textContent(), 'Total: 5');
-    assert.equal(await page.locator('#histogram-exact-zero').textContent(), 'Exactly 0: 2 (40.0%)');
+    assert.equal(await page.locator('#histogram-exact-zero').textContent(), 'Exactly 0: 0 (0.0%)');
     await page.locator('[data-property="view-evidence"]').click();
     await page.waitForFunction(() => !document.querySelector('#histogram-view-dependent-stats').hidden);
     assert.equal(await page.locator('#histogram-exact-one').isVisible(), false);
@@ -295,8 +373,30 @@ try {
         assert.equal(await page.locator(`[data-property="${other}"]`).count(), 0);
         assert.equal((await histogram(mode)).total, 2, 'independent-field shader variant');
     }
+    // Near-grazing observations must not leak across the local tangent plane,
+    // even when the query direction is still close to the training direction.
+    const grazing = [0.984807753, 0, 0.173648178];
+    await importPly(makeSidedPly([0, 4], grazing));
+    for (const rotate of [false, true]) {
+        await pose(grazing, rotate);
+        await threshold('min-view-evidence', 1);
+        assert.equal(await visible(), true, 'grazing training view retains its full evidence');
+        await pose([0, 0, 1], rotate);
+        assert.equal(await visible(), false, 'novel normal direction has less evidence');
+        await pose([grazing[0], 0, -grazing[2]], rotate);
+        assert.equal(await visible(), false, 'opposite surface side has zero evidence');
+        const backside = await histogram(70);
+        assert.equal(backside.max, 0);
+        assert.equal(backside.zero, 2);
+        assert.equal((await histogram(69)).min, 1, 'unobserved side has maximum uncertainty');
+    }
+    await importPly(makeSidedPly([0, 4], grazing, [0, 0, 1], 2));
+    await pose(grazing.map(v => -v));
+    await threshold('min-view-evidence', 1.9);
+    assert.equal(await visible(), true, 'observations on the second side retain independent evidence');
+    assert.ok(Math.abs((await histogram(69)).max - 0.8) < 1e-6, 'opposite uncertainty bank is selected');
     assert.deepEqual(errors, [], 'browser/GPU errors');
-    console.log('Browser checks passed: four directional limits, range crossings, project compatibility, picking, histograms, exact endpoints, bin selection, camera/rotation/orthographic views, ordinary PLY.');
+    console.log('Browser checks passed: Hide/color display modes, RGB/opacity preservation, project compatibility, picking, four ranges, histograms, camera/rotation/orthographic views, ordinary PLY.');
 } finally {
     await browser.close();
 }

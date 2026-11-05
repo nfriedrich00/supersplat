@@ -5,7 +5,9 @@ import {
 
 const uncertaintyPrefix = 'appearance_uncertainty_sh_';
 const evidencePrefix = 'observation_evidence_sh_';
-const viewDependentPrefixes = [uncertaintyPrefix, evidencePrefix];
+const viewDependentPrefixes = [uncertaintyPrefix, evidencePrefix,
+    'appearance_uncertainty_opposite_sh_', 'observation_evidence_opposite_sh_'];
+const evidenceNormalNames = ['evidence_normal_x', 'evidence_normal_y', 'evidence_normal_z'];
 const coefficientNames = (prefix: string) => Array.from({ length: 16 }, (_, i) => `${prefix}${i}`);
 
 // Four RGBA32F array layers per scalar SH field. Array layers keep the same
@@ -13,7 +15,8 @@ const coefficientNames = (prefix: string) => Array.from({ length: 16 }, (_, i) =
 // increasing the maximum 2D texture dimensions.
 const packViewDependent = (data: GSplatData, capacity: number) => {
     const layers: Float32Array[] = [];
-    const offsets = [-1, -1];
+    const offsets = [-1, -1, -1, -1];
+    let normalLayer = -1;
     let evidenceMax = 0;
     viewDependentPrefixes.forEach((prefix, field) => {
         const names = coefficientNames(prefix);
@@ -41,23 +44,54 @@ const packViewDependent = (data: GSplatData, capacity: number) => {
                 // directions, not just the current camera or a sampled sphere.
                 bound += Math.sqrt(normSquared * (2 * l + 1) / (4 * Math.PI));
             }
-            if (field === 1) evidenceMax = Math.max(evidenceMax, bound);
+            if (field === 1 || field === 3) evidenceMax = Math.max(evidenceMax, bound);
         }
         layers.push(...packed);
     });
-    return { layers, uncertaintyLayer: offsets[0], evidenceLayer: offsets[1], evidenceMax: Math.max(1, Math.ceil(evidenceMax)) };
+    const normals = evidenceNormalNames.map(name => data.getProp(name) as Float32Array);
+    const sided = offsets[2] >= 0 || offsets[3] >= 0 || normals.some(Boolean);
+    if (sided) {
+        if (offsets.some(offset => offset < 0) || !normals.every(Boolean)) {
+            throw new Error('Planar side fields require both complete SH banks and all three evidence normals.');
+        }
+        normalLayer = layers.length;
+        const packed = new Float32Array(capacity * 4);
+        for (let i = 0; i < data.numSplats; i++) {
+            for (let c = 0; c < 3; c++) {
+                const value = normals[c][i];
+                if (!Number.isFinite(value)) throw new Error(`Non-finite ${evidenceNormalNames[c]} at Gaussian ${i}.`);
+                packed[i * 4 + c] = value;
+            }
+        }
+        layers.push(packed);
+    }
+    return {
+        layers,
+        uncertaintyLayer: offsets[0],
+        evidenceLayer: offsets[1],
+        oppositeUncertaintyLayer: offsets[2],
+        oppositeEvidenceLayer: offsets[3],
+        normalLayer,
+        evidenceMax: Math.max(1, Math.ceil(evidenceMax))
+    };
 };
 
 class ViewDependentData {
     texture: Texture;
     uncertaintyLayer: number;
     evidenceLayer: number;
+    oppositeUncertaintyLayer: number;
+    oppositeEvidenceLayer: number;
+    normalLayer: number;
     evidenceMax: number;
 
     constructor(device: GraphicsDevice, data: GSplatData, width: number, height: number) {
         const packed = packViewDependent(data, width * height);
         this.uncertaintyLayer = packed.uncertaintyLayer;
         this.evidenceLayer = packed.evidenceLayer;
+        this.oppositeUncertaintyLayer = packed.oppositeUncertaintyLayer;
+        this.oppositeEvidenceLayer = packed.oppositeEvidenceLayer;
+        this.normalLayer = packed.normalLayer;
         this.evidenceMax = packed.evidenceMax;
         if (packed.layers.length) {
             this.texture = new Texture(device, {
@@ -79,13 +113,16 @@ class ViewDependentData {
     }
 
     get shaderKey() {
-        return `${this.uncertaintyLayer}_${this.evidenceLayer}`;
+        return `${this.uncertaintyLayer}_${this.evidenceLayer}_${this.oppositeUncertaintyLayer}_${this.oppositeEvidenceLayer}_${this.normalLayer}`;
     }
 
     getShaderDefines() {
         return new Map([
             ['VIEW_UNCERTAINTY_LAYER', `${this.uncertaintyLayer}`],
-            ['VIEW_EVIDENCE_LAYER', `${this.evidenceLayer}`]
+            ['VIEW_EVIDENCE_LAYER', `${this.evidenceLayer}`],
+            ['VIEW_OPPOSITE_UNCERTAINTY_LAYER', `${this.oppositeUncertaintyLayer}`],
+            ['VIEW_OPPOSITE_EVIDENCE_LAYER', `${this.oppositeEvidenceLayer}`],
+            ['VIEW_EVIDENCE_NORMAL_LAYER', `${this.normalLayer}`]
         ]);
     }
 
@@ -99,4 +136,4 @@ class ViewDependentData {
     }
 }
 
-export { ViewDependentData, coefficientNames, packViewDependent, viewDependentPrefixes };
+export { ViewDependentData, coefficientNames, packViewDependent, viewDependentPrefixes, evidenceNormalNames };

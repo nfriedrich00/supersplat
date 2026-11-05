@@ -3,7 +3,8 @@ import { version as appVersion } from '../package.json';
 // export default null
 declare let self: ServiceWorkerGlobalScope;
 
-const cacheName = `superSplat-v${appVersion}`;
+const buildRevision = '__SUPERSPLAT_BUILD_REVISION__';
+const cacheName = `superSplat-v${appVersion}-${buildRevision}`;
 
 const cacheUrls = [
     './',
@@ -27,33 +28,29 @@ const cacheUrls = [
 ];
 
 self.addEventListener('install', (event) => {
-    console.log(`installing v${appVersion}`);
+    console.log(`installing v${appVersion} build ${buildRevision}`);
 
     // create cache for current version
     event.waitUntil(
         caches.open(cacheName)
-        .then((cache) => {
-            cache.addAll(cacheUrls);
-        })
+        .then(cache => cache.addAll(cacheUrls))
+        .then(() => self.skipWaiting())
     );
 });
 
-self.addEventListener('activate', () => {
-    console.log(`activating v${appVersion}`);
+self.addEventListener('activate', (event) => {
+    console.log(`activating v${appVersion} build ${buildRevision}`);
 
     // delete the old caches once this one is activated
-    caches.keys().then((names) => {
-        for (const name of names) {
-            if (name !== cacheName) {
-                caches.delete(name);
-            }
-        }
-    });
+    event.waitUntil(caches.keys().then(names => Promise.all(
+        names.filter(name => name.startsWith('superSplat-v') && name !== cacheName)
+        .map(name => caches.delete(name))
+    )).then(() => self.clients.claim()));
 });
 
 self.addEventListener('fetch', (event) => {
     event.respondWith(
-        caches.match(event.request)
+        caches.open(cacheName).then(cache => cache.match(event.request))
         .then(response => response ?? fetch(event.request))
     );
 });

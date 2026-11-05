@@ -37,7 +37,7 @@ import { Events } from './events';
 import { SHRotation } from './sh-utils';
 import { Splat } from './splat';
 import { State } from './splat-state';
-import { coefficientNames, viewDependentPrefixes } from './view-dependent';
+import { coefficientNames, viewDependentPrefixes, evidenceNormalNames } from './view-dependent';
 
 type SerializeSettings = {
     maxSHBands?: number;            // specifies the maximum number of bands to be exported
@@ -259,9 +259,10 @@ class SplatTransformCache {
     getRot: (index: number) => Quat;
     getScale: (index: number) => Vec3;
     getSHRot: (index: number) => SHRotation;
+    getNormalMat: (index: number) => Mat4;
 
     constructor(splat: Splat, keepWorldTransform = false) {
-        const transforms = new Map<number, { transformIndex: number, mat: Mat4, rot: Quat, scale: Vec3, shRot: SHRotation }>();
+        const transforms = new Map<number, { transformIndex: number, mat: Mat4, rot: Quat, scale: Vec3, shRot: SHRotation, normalMat: Mat4 }>();
         const indices = splat.transformTexture.getSource() as unknown as Uint32Array;
         const tmpMat = new Mat4();
         const tmpMat3 = new Mat3();
@@ -271,7 +272,7 @@ class SplatTransformCache {
             const transformIndex = indices?.[index] ?? 0;
             let result = transforms.get(transformIndex);
             if (!result) {
-                result = { transformIndex, mat: null, rot: null, scale: null, shRot: null };
+                result = { transformIndex, mat: null, rot: null, scale: null, shRot: null, normalMat: null };
                 transforms.set(transformIndex, result);
             }
             return result;
@@ -334,6 +335,11 @@ class SplatTransformCache {
 
             return transform.shRot;
         };
+        this.getNormalMat = (index: number) => {
+            const transform = getTransform(index);
+            if (!transform.normalMat) transform.normalMat = new Mat4().invert(this.getMat(index)).transpose();
+            return transform.normalMat;
+        };
     }
 }
 
@@ -358,6 +364,7 @@ class SingleSplat {
         const hasScale = ['scale_0', 'scale_1', 'scale_2'].every(v => data.hasOwnProperty(v));
         const hasColor = ['f_dc_0', 'f_dc_1', 'f_dc_2'].every(v => data.hasOwnProperty(v));
         const hasOpacity = data.hasOwnProperty('opacity');
+        const hasEvidenceNormal = evidenceNormalNames.every(name => data.hasOwnProperty(name));
 
         const dstSHBands = calcSHBands(new Set(Object.keys(data)));
         const dstSHCoeffs = shBandCoeffs[dstSHBands];
@@ -423,6 +430,14 @@ class SingleSplat {
                 v.set(data.x, data.y, data.z);
                 mat.transformPoint(v, v);
                 [data.x, data.y, data.z] = [v.x, v.y, v.z];
+            }
+
+            if (hasEvidenceNormal) {
+                // Normals are covectors: preserve the side test under scale
+                // as well as rotation when transforms are baked into a PLY.
+                v.set(data.evidence_normal_x, data.evidence_normal_y, data.evidence_normal_z);
+                transformCache.getNormalMat(i).transformVector(v, v).normalize();
+                [data.evidence_normal_x, data.evidence_normal_y, data.evidence_normal_z] = [v.x, v.y, v.z];
             }
 
             if (hasRotation) {
@@ -572,6 +587,7 @@ class SuperSplatChunkSource implements ChunkSource {
         const common = new Set(getCommonPropNames(splats));
         this.extras = viewDependentPrefixes.map(coefficientNames)
         .filter(names => names.every(name => common.has(name))).flat();
+        if (evidenceNormalNames.every(name => common.has(name))) this.extras.push(...evidenceNormalNames);
 
         // Build the filtered output->source index map (in splat order).
         const filter = new GaussianFilter(settings);

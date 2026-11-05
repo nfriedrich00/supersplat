@@ -60,6 +60,8 @@ class Splat extends Element {
     private _maxViewUncertainty = 1;
     private _minViewEvidence = 0;
     private _maxViewEvidence: number | null = null;
+    private _outsideThresholdMode: 'hide' | 'color' = 'hide';
+    private _outsideThresholdColor = new Color(1, 1, 1);
     selectionBoundStorage: BoundingBox;
     localBoundStorage: BoundingBox;
     worldBoundStorage: BoundingBox;
@@ -448,6 +450,7 @@ class Splat extends Element {
         serializer.pack(this.tintClr.r, this.tintClr.g, this.tintClr.b);
         serializer.pack(this.temperature, this.saturation, this.brightness, this.blackPoint, this.whitePoint, this.transparency);
         serializer.pack(this.minViewUncertainty, this.maxViewUncertainty, this.minViewEvidence, this.maxViewEvidence);
+        serializer.pack(this.outsideThresholdMode, this.outsideThresholdColor.r, this.outsideThresholdColor.g, this.outsideThresholdColor.b);
     }
 
     onPreRender() {
@@ -651,13 +654,16 @@ class Splat extends Element {
         return this._transparency;
     }
 
-    updateViewDependentMaterial(material: { setParameter: (name: string, value: number) => void }) {
+    updateViewDependentMaterial(material: { setParameter: (name: string, value: number | number[]) => void }) {
         material.setParameter('minViewUncertainty', this.minViewUncertainty);
         material.setParameter('maxViewUncertainty', this.maxViewUncertainty);
         material.setParameter('minViewEvidence', this.minViewEvidence);
         // A negative shader value disables the upper evidence bound. Keep the
         // stored value nullable so project JSON can represent an unlimited cap.
         material.setParameter('maxViewEvidence', this.maxViewEvidence ?? -1);
+        material.setParameter('outsideThresholdMode', this.outsideThresholdMode === 'color' ? 1 : 0);
+        const color = this.outsideThresholdColor;
+        material.setParameter('outsideThresholdColor', [color.r, color.g, color.b]);
     }
 
     set minViewUncertainty(value: number) {
@@ -718,6 +724,34 @@ class Splat extends Element {
         return this._maxViewEvidence;
     }
 
+    set outsideThresholdMode(value: 'hide' | 'color') {
+        if (value !== 'hide' && value !== 'color') return;
+        if (value !== this._outsideThresholdMode) {
+            this._outsideThresholdMode = value;
+            this.viewDependentChanged();
+        }
+    }
+
+    get outsideThresholdMode() {
+        return this._outsideThresholdMode;
+    }
+
+    set outsideThresholdColor(value: Color) {
+        if (![value.r, value.g, value.b].every(Number.isFinite)) return;
+        const r = Math.max(0, Math.min(1, value.r));
+        const g = Math.max(0, Math.min(1, value.g));
+        const b = Math.max(0, Math.min(1, value.b));
+        const color = this._outsideThresholdColor;
+        if (color.r !== r || color.g !== g || color.b !== b) {
+            color.set(r, g, b);
+            this.viewDependentChanged();
+        }
+    }
+
+    get outsideThresholdColor() {
+        return this._outsideThresholdColor;
+    }
+
     private viewDependentChanged() {
         if (this.scene) {
             this.scene.forceRender = true;
@@ -768,7 +802,9 @@ class Splat extends Element {
             minViewUncertainty: this.minViewUncertainty,
             maxViewUncertainty: this.maxViewUncertainty,
             minViewEvidence: this.minViewEvidence,
-            maxViewEvidence: this.maxViewEvidence
+            maxViewEvidence: this.maxViewEvidence,
+            outsideThresholdMode: this.outsideThresholdMode,
+            outsideThresholdColor: [this.outsideThresholdColor.r, this.outsideThresholdColor.g, this.outsideThresholdColor.b]
         };
     }
 
@@ -796,6 +832,10 @@ class Splat extends Element {
         this.maxViewEvidence = null;
         this.minViewEvidence = doc.minViewEvidence ?? 0;
         this.maxViewEvidence = doc.maxViewEvidence ?? null;
+        this.outsideThresholdMode = doc.outsideThresholdMode === 'color' ? 'color' : 'hide';
+        const color = doc.outsideThresholdColor;
+        this.outsideThresholdColor = Array.isArray(color) && color.length === 3 && color.every(Number.isFinite) ?
+            new Color(color[0], color[1], color[2]) : Color.WHITE;
     }
 }
 

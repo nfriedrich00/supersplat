@@ -23,6 +23,9 @@ const BUILD_TYPE = process.env.BUILD_TYPE || 'release';
 const ENGINE_DIR = path.resolve(`node_modules/playcanvas/build/playcanvas${BUILD_TYPE === 'debug' ? '.dbg' : ''}/src/index.js`);
 const PCUI_DIR = path.resolve('node_modules/@playcanvas/pcui');
 const HREF = process.env.BASE_HREF || '';
+// Local builds keep the upstream package version. Give every build a distinct
+// service-worker cache so a renderer change cannot reuse an older index.js.
+const BUILD_REVISION = Date.now().toString(36);
 
 const outputHeader = () => {
     const BLUE_OUT = '\x1b[34m';
@@ -106,6 +109,13 @@ const serviceWorker = {
         sourcemap: true
     },
     plugins: [
+        {
+            name: 'service-worker-build-revision',
+            transform(code, id) {
+                if (!id.endsWith('/src/sw.ts')) return null;
+                return code.replaceAll('__SUPERSPLAT_BUILD_REVISION__', BUILD_REVISION);
+            }
+        },
         resolve(),
         json(),
         typescript()

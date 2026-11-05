@@ -130,7 +130,8 @@ const vertexShader = /* glsl */ `
             vec3 center = uintBitsToFloat(texelFetch(splatPosition, splatUV, 0).xyz);
 
             mat4 modelView = matrix_view * model;
-            if (!viewDependentVisible(splatUV, (modelView * vec4(center, 1.0)).xyz, modelView, camera_params.w == 1.0)) {
+            bool outsideThresholds = !viewDependentVisible(splatUV, (modelView * vec4(center, 1.0)).xyz, modelView, camera_params.w == 1.0);
+            if (outsideThresholds && outsideThresholdMode == 0) {
                 gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
                 gl_PointSize = 0.0;
                 return;
@@ -138,7 +139,9 @@ const vertexShader = /* glsl */ `
 
             vec3 gaussianClr;
 
-            if (useGaussianColor > 0.0) {
+            if (outsideThresholds) {
+                gaussianClr = outsideThresholdColor;
+            } else if (useGaussianColor > 0.0) {
                 // get base gaussian color
                 gaussianClr = texelFetch(splatColor, splatUV, 0).xyz;
 

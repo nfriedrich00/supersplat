@@ -402,10 +402,10 @@ bool computeSplatValue(int idx, out float value, out bool selected, out bool vis
         vec3 viewCenter = (modelView * vec4(s.localPos, 1.0)).xyz;
         vec3 direction = viewDependentDirection(viewCenter, modelView, cameraIsOrtho == 1);
         #if VIEW_UNCERTAINTY_LAYER >= 0
-        if (propMode == 69) value = clamp(evaluateViewSH(s.uv, VIEW_UNCERTAINTY_LAYER, direction), 0.0, 1.0);
+        if (propMode == 69) value = evaluateViewUncertainty(s.uv, direction);
         #endif
         #if VIEW_EVIDENCE_LAYER >= 0
-        if (propMode == 70) value = max(evaluateViewSH(s.uv, VIEW_EVIDENCE_LAYER, direction), 0.0);
+        if (propMode == 70) value = evaluateViewEvidence(s.uv, direction);
         #endif
     }
     #endif

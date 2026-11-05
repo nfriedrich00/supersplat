@@ -1,4 +1,5 @@
-import { Button, Container, Label, SliderInput } from '@playcanvas/pcui';
+import { Button, ColorPicker, Container, Label, SelectInput, SliderInput } from '@playcanvas/pcui';
+import { Color } from 'playcanvas';
 
 import { Events } from '../events';
 import { Splat } from '../splat';
@@ -38,6 +39,36 @@ class ViewDependentControls extends Container {
         const maxEvidence = slider('panel.view-dependent.max-evidence', 'max-view-evidence', 1, 1);
         minEvidence.max = undefined;
         maxEvidence.max = undefined;
+
+        const modeRow = new Container({ class: 'view-dependent-row' });
+        const modeLabel = new Label({ class: 'view-dependent-label' });
+        i18n.bindText(modeLabel, 'panel.view-dependent.outside-range');
+        const mode = new SelectInput({
+            id: 'outside-threshold-mode',
+            class: 'view-dependent-select',
+            defaultValue: 'hide'
+        });
+        i18n.bindOptions(mode, () => [
+            { v: 'hide', t: i18n.t('panel.view-dependent.outside-hide') },
+            { v: 'color', t: i18n.t('panel.view-dependent.outside-color') }
+        ]);
+        modeRow.append(modeLabel);
+        modeRow.append(mode);
+        this.append(modeRow);
+
+        const colorRow = new Container({ class: 'view-dependent-row', hidden: true });
+        const colorLabel = new Label({ class: 'view-dependent-label' });
+        i18n.bindText(colorLabel, 'panel.view-dependent.fallback-color');
+        const colorPicker = new ColorPicker({
+            id: 'outside-threshold-color',
+            class: 'view-dependent-color',
+            channels: 3,
+            value: [1, 1, 1]
+        });
+        colorRow.append(colorLabel);
+        colorRow.append(colorPicker);
+        this.append(colorRow);
+
         const note = new Label({ class: 'view-dependent-note' });
         this.append(note);
         const reset = new Button({ class: 'view-dependent-reset' });
@@ -61,6 +92,11 @@ class ViewDependentControls extends Container {
             minEvidence.value = selected?.minViewEvidence ?? 0;
             maxEvidence.value = selected?.maxViewEvidence ?? evidenceRange;
             reset.enabled = minUncertainty.enabled || minEvidence.enabled;
+            mode.enabled = reset.enabled;
+            mode.value = selected?.outsideThresholdMode ?? 'hide';
+            colorRow.hidden = !reset.enabled || mode.value !== 'color';
+            const color = selected?.outsideThresholdColor;
+            colorPicker.value = color ? [color.r, color.g, color.b] : [1, 1, 1];
             note.text = i18n.t(reset.enabled ? 'panel.view-dependent.note' : 'panel.view-dependent.missing');
             updating = false;
         };
@@ -76,6 +112,12 @@ class ViewDependentControls extends Container {
         });
         maxEvidence.on('change', (value: number) => {
             if (!updating && selected) selected.maxViewEvidence = value;
+        });
+        mode.on('change', (value: 'hide' | 'color') => {
+            if (!updating && selected) selected.outsideThresholdMode = value;
+        });
+        colorPicker.on('change', (value: number[]) => {
+            if (!updating && selected) selected.outsideThresholdColor = new Color(value[0], value[1], value[2]);
         });
         reset.on('click', () => {
             if (selected) {

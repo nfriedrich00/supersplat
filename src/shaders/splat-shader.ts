@@ -80,7 +80,8 @@ void main(void) {
         return;
     }
 
-    if (!viewDependentVisible(splat.uv, center.view, center.modelView, camera_params.w == 1.0)) {
+    bool outsideThresholds = !viewDependentVisible(splat.uv, center.view, center.modelView, camera_params.w == 1.0);
+    if (outsideThresholds && outsideThresholdMode == 0) {
         gl_Position = discardVec;
         return;
     }
@@ -117,31 +118,38 @@ void main(void) {
         // read color
         color = getColor();
 
-        // evaluate spherical harmonics
-        #if SH_BANDS > 0
-        // calculate the model-space view direction
-            vec3 dir = normalize(center.view * mat3(center.modelView));
+        if (outsideThresholds) {
+            // Preserve shape and opacity but bypass uncertain appearance SH,
+            // grading and tone mapping. Keep the chosen display RGB unchanged.
+            color.xyz = outsideThresholdColor;
+            color.a = clamp(color.a * clrScale.a, 0.0, 1.0);
+        } else {
+            // evaluate spherical harmonics
+            #if SH_BANDS > 0
+                // calculate the model-space view direction
+                vec3 dir = normalize(center.view * mat3(center.modelView));
 
-            // read sh coefficients
-            vec3 sh[SH_COEFFS];
-            float scale;
-            readSHData(sh, scale);
+                // read sh coefficients
+                vec3 sh[SH_COEFFS];
+                float scale;
+                readSHData(sh, scale);
 
-            // evaluate
-            color.xyz += evalSH(sh, dir) * scale;
-        #endif
+                // evaluate
+                color.xyz += evalSH(sh, dir) * scale;
+            #endif
 
-        // apply tint/brightness
-        color = color * clrScale + vec4(clrOffset, 0.0);
+            // apply tint/brightness
+            color = color * clrScale + vec4(clrOffset, 0.0);
 
-        // apply saturation
-        color.xyz = applySaturation(color.xyz);
+            // apply saturation
+            color.xyz = applySaturation(color.xyz);
 
-        // don't allow out-of-range alpha
-        color.a = clamp(color.a, 0.0, 1.0);
+            // don't allow out-of-range alpha
+            color.a = clamp(color.a, 0.0, 1.0);
 
-        // apply tonemapping
-        color = vec4(prepareOutputFromGamma(max(color.xyz, 0.0), -center.view.z), color.w);
+            // apply tonemapping
+            color = vec4(prepareOutputFromGamma(max(color.xyz, 0.0), -center.view.z), color.w);
+        }
 
         // apply locked/selected colors
         if ((vertexState & 2u) != 0u) {

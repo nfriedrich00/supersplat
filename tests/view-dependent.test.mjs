@@ -6,8 +6,8 @@ import { Color, Mat4, Vec3 } from 'playcanvas';
 
 import { loadGSplatData } from '../src/io/read/loader.ts';
 import { writeSplatFile } from '../src/splat-serialize.ts';
-import { coefficientNames, packViewDependent, viewDependentPrefixes } from '../src/view-dependent.ts';
-import { makePly, basis, kernelSH, evaluate } from './view-dependent-fixture.mjs';
+import { coefficientNames, packViewDependent, viewDependentPrefixes, evidenceNormalNames } from '../src/view-dependent.ts';
+import { makePly, makeSidedPly, basis, kernelSH, evaluate } from './view-dependent-fixture.mjs';
 
 const read = async (bytes, reorder = true) => {
     const fs = new MemoryReadFileSystem();
@@ -34,7 +34,7 @@ test('PLY reordering retains the scalar fields on their original Gaussians', asy
 test('ordinary PLYs, independent fields, incomplete fields, and non-finite SH', async () => {
     const ordinary = await read(makePly([0], []));
     assert.equal(packViewDependent(ordinary, 1).layers.length, 0);
-    for (const prefix of viewDependentPrefixes) {
+    for (const prefix of viewDependentPrefixes.slice(0, 2)) {
         const one = await read(makePly([0], [prefix]));
         assert.equal(packViewDependent(one, 1).layers.length, 4);
         one.getProp(`${prefix}1`)[0] = NaN;
@@ -61,7 +61,7 @@ test('uncompressed PLY export preserves and rotates both scalar SH fields', asyn
         const fs = new MemoryFileSystem();
         await writeSplatFile([splat], settings, 'ply', 'output.ply', {}, fs);
         const out = await read(fs.results.get('output.ply'));
-        for (const prefix of viewDependentPrefixes) {
+        for (const prefix of viewDependentPrefixes.slice(0, 2)) {
             const inputSH = coefficientNames(prefix).map(name => data.getProp(name)[0]);
             const outputSH = coefficientNames(prefix).map(name => out.getProp(name)[0]);
             for (const d of [[1, 0, 0], [0, 0, 1], [0.6, 0.8, 0]]) {
@@ -70,6 +70,41 @@ test('uncompressed PLY export preserves and rotates both scalar SH fields', asyn
             }
         }
     }
+});
+
+test('planar sides survive reordering, packing, export and normal rotation', async () => {
+    const data = await read(makeSidedPly([2, -1, 0]));
+    const packed = packViewDependent(data, 4);
+    assert.equal(packed.layers.length, 17);
+    assert.equal(packed.normalLayer, 16);
+    assert.equal(packed.oppositeEvidenceLayer, 12);
+    for (let i = 0; i < data.numSplats; i++) {
+        assert.equal(packed.layers[16][i * 4 + 2], 1);
+        assert.ok(packed.layers.slice(12, 16).every(layer => layer.slice(i * 4, i * 4 + 4).every(v => v === 0)));
+    }
+    data.addProp('state', new Uint8Array(data.numSplats));
+    const turn = new Mat4().setFromEulerAngles(23, 51, -17);
+    const world = new Mat4().mul2(new Mat4().setFromEulerAngles(0, 0, 180), turn);
+    const splat = {
+        splatData: data, entity: { getWorldTransform: () => world },
+        transformTexture: { getSource: () => new Uint16Array(data.numSplats) },
+        tintClr: new Color(1, 1, 1), temperature: 0, saturation: 1,
+        brightness: 0, blackPoint: 0, whitePoint: 1, transparency: 1
+    };
+    const fs = new MemoryFileSystem();
+    await writeSplatFile([splat], {}, 'ply', 'output.ply', {}, fs);
+    const out = await read(fs.results.get('output.ply'), false);
+    const expectedNormal = turn.transformVector(new Vec3(0, 0, 1));
+    for (let c = 0; c < 3; c++) assert.ok(Math.abs(out.getProp(evidenceNormalNames[c])[0] - [expectedNormal.x, expectedNormal.y, expectedNormal.z][c]) < 1e-6);
+    for (const prefix of viewDependentPrefixes) assert.ok(coefficientNames(prefix).every(name => !!out.getProp(name)));
+    const obs = [0.984807753, 0, 0.173648178];
+    const rotated = turn.transformVector(new Vec3(obs));
+    const sh = coefficientNames('observation_evidence_sh_').map(name => out.getProp(name)[0]);
+    assert.ok(Math.abs(evaluate(sh, [rotated.x, rotated.y, rotated.z]) - (data.getProp('x')[0] + 3)) < 1e-5);
+    data.getProp('evidence_normal_z')[0] = NaN;
+    assert.throws(() => packViewDependent(data, 4), /Non-finite/);
+    const missing = await read(makePly([0], viewDependentPrefixes));
+    assert.throws(() => packViewDependent(missing, 1), /both complete SH banks/);
 });
 
 test('degree-3 coefficients reproduce the observation kernel for oblique views', () => {
